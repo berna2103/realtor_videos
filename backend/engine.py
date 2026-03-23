@@ -1,8 +1,3 @@
-Here is your fully updated `engine.py` file. 
-
-This version includes the custom `phone` field updates we made earlier, and it removes the memory-heavy crossfades (`vfx.CrossFadeIn` and `padding=-0.6`) while dropping `threads` down to `1`. This is the exact configuration needed to drastically slash the RAM usage so your 4GB Railway server can successfully render 20-picture Zillow listings without crashing.
-
-```python
 import os
 import time
 import asyncio
@@ -26,6 +21,7 @@ from moviepy import (
     AudioFileClip, 
     CompositeAudioClip,
     concatenate_audioclips, 
+    VideoFileClip,  # Added for chunking
     vfx, 
     afx
 )
@@ -150,7 +146,6 @@ def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths
         bbox = draw.textbbox((0, 0), details_str, font=f_det)
         d_w, d_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
 
-    # Dynamic Phone Number
     contact_str = f"Schedule a Showing!\n {phone}" if phone else "Schedule a Showing!"
     bbox = draw.textbbox((0, 0), contact_str, font=f_contact)
     c_w, c_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
@@ -516,7 +511,8 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
     return final_clip
 
 def render_cinematic_video(job_id, req, output_path, base_dir):
-    clips = []
+    temp_video_files = []
+    loaded_chunks = []
     final = None
     logo_file_path = None
     
@@ -565,20 +561,33 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
                 base_dir=base_dir
             )
             
-            # CrossFades removed to save massive amounts of RAM
-            clips.append(clip)
+            # --- CHUNKING IMPLEMENTATION ---
+            chunk_path = os.path.join(base_dir, f"temp_chunk_{job_id}_{i}.mp4")
+            clip.write_videofile(
+                chunk_path, fps=24, codec="libx264", audio_codec="aac", 
+                threads=1, preset="ultrafast", logger=None
+            )
+            temp_video_files.append(chunk_path)
+            clip.close() # CRITICAL: Free RAM immediately
 
-        # End screen without the CrossFadeIn
+        # End screen
         end_screen = create_end_screen(
             job_id, tw, th, meta.get('agent', ''), meta.get('brokerage', ''), meta.get('phone', ''), 5.0, 
             req_dict.get('language', 'English'), meta.get('mls_source', ''), meta.get('mls_number', ''), 
             req_dict.get('font', 'Montserrat'), theme_color=req_dict.get('primary_color', '#552448'), base_dir=base_dir
         )
         
-        clips.append(end_screen)
+        end_chunk_path = os.path.join(base_dir, f"temp_chunk_{job_id}_end.mp4")
+        end_screen.write_videofile(
+            end_chunk_path, fps=24, codec="libx264", audio_codec="aac", 
+            threads=1, preset="ultrafast", logger=None
+        )
+        temp_video_files.append(end_chunk_path)
+        end_screen.close()
 
-        # Removed padding and compose method to allow sequential playback with low RAM
-        final = concatenate_videoclips(clips)
+        # --- FINAL STITCHING PHASE ---
+        loaded_chunks = [VideoFileClip(path) for path in temp_video_files]
+        final = concatenate_videoclips(loaded_chunks)
 
         music_choice = req_dict.get('music')
         if music_choice and music_choice != "none" and music_choice in MUSIC_MAP:
@@ -608,20 +617,19 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
                 except Exception as e:
                     print(f"Failed to apply music cleanly: {e}")
 
-        # Threads dropped to 1 to drastically lower RAM consumption
         final.write_videofile(
             output_path, 
             fps=24, 
             codec="libx264", 
             audio_codec="aac", 
-            threads=1, 
+            threads=2, # Safe to use 2 here for stitching speed
             preset="ultrafast", 
             ffmpeg_params=["-movflags", "faststart"]
         )
         return True
 
     finally:
-        for c in clips:
+        for c in loaded_chunks:
             try: c.close()
             except: pass
         if final:
