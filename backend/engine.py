@@ -638,7 +638,7 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
             fps=24, 
             codec="libx264", 
             audio_codec="aac", 
-            threads=4, 
+            threads=1, 
             preset="ultrafast", 
             ffmpeg_params=["-movflags", "faststart"]
         )
