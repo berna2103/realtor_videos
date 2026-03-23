@@ -22,6 +22,7 @@ interface Scene {
 interface Meta {
   address: string; price: string; beds: string; baths: string; sqft: string;
   agent: string; brokerage: string; mls_source: string; mls_number: string;
+  phone: string;
 }
 
 const RENDER_MESSAGES = [
