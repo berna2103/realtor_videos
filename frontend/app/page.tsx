@@ -195,7 +195,7 @@ export default function CinematicListingApp() {
   };
 
   // --- SCENE HELPERS ---
-  const updateScene = (index: number, field: keyof Scene, value: any) => {
+  const updateScene = (index: number, field: keyof Scene, value: unknown) => {
     const newScenes = [...scenes];
     newScenes[index] = { ...newScenes[index], [field]: value };
     setScenes(newScenes);
@@ -342,7 +342,7 @@ export default function CinematicListingApp() {
           {step === 1 && (
             <div className="max-w-2xl mx-auto mt-16 text-center animate-in fade-in slide-in-from-bottom-4 duration-700">
               <h2 className="text-4xl md:text-5xl font-extrabold mb-4 text-white tracking-tight">Automate your listings.</h2>
-              <p className="text-lg text-neutral-400 mb-10">Paste a Zillow URL. We'll extract the photos, analyze the rooms, and build a cinematic storyboard instantly.</p>
+              <p className="text-lg text-neutral-400 mb-10">Paste a Zillow URL. We will extract the photos, analyze the rooms, and build a cinematic storyboard instantly.</p>
               <div className="p-2 bg-neutral-900/50 backdrop-blur-md rounded-2xl border border-neutral-800 shadow-2xl flex flex-col sm:flex-row gap-2">
                 <div className="relative flex-1">
                   <LinkIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
