@@ -58,7 +58,7 @@ export default function CinematicListingApp() {
   const [logoData, setLogoData] = useState<string | null>(null);
 
   const [meta, setMeta] = useState<Meta>({
-    address: '', price: '', beds: '', baths: '', sqft: '', agent: '', brokerage: '', mls_source: '', mls_number: ''
+    address: '', price: '', beds: '', baths: '', sqft: '', agent: '', brokerage: '', phone: '',mls_source: '', mls_number: ''
   });
   const [fbDraft, setFbDraft] = useState('');
   const [scenes, setScenes] = useState<Scene[]>([]);
