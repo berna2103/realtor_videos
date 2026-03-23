@@ -13,6 +13,7 @@
 output/
 .env
 raw_photos/
+venv/
 
 # testing
 /coverage
