@@ -22,7 +22,7 @@ interface Scene {
 interface Meta {
   address: string; price: string; beds: string; baths: string; sqft: string;
   agent: string; brokerage: string; mls_source: string; mls_number: string;
-  phone: string;
+  phone: string; website: string;
 }
 
 const RENDER_MESSAGES = [
@@ -58,14 +58,19 @@ export default function CinematicListingApp() {
   const [logoData, setLogoData] = useState<string | null>(null);
 
   const [meta, setMeta] = useState<Meta>({
-    address: '', price: '', beds: '', baths: '', sqft: '', agent: '', brokerage: '', phone: '',mls_source: '', mls_number: ''
+    address: '', price: '', beds: '', baths: '', sqft: '', agent: '', brokerage: '', phone: '', website: '', mls_source: '', mls_number: ''
   });
+  
+  const [isOwnListing, setIsOwnListing] = useState<boolean>(true);
+  
   const [fbDraft, setFbDraft] = useState('');
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [statusChoice, setStatusChoice] = useState('Just Listed');
 
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+
+  const isCompliant = isOwnListing || (meta.agent && meta.brokerage && meta.mls_source && meta.mls_number);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -90,7 +95,7 @@ export default function CinematicListingApp() {
       if (!response.ok) throw new Error("Backend returned an error");
 
       const data = await response.json();
-      setMeta(data.meta);
+      setMeta({ ...meta, ...data.meta });
       setFbDraft(data.fbDraft);
       setScenes(data.scenes);
       setStep(2);
@@ -103,10 +108,9 @@ export default function CinematicListingApp() {
   };
 
   const handleRenderVideo = async () => {
-    setIsRendering(true); // Trigger the cinematic loading screen
+    setIsRendering(true); 
     setRenderMsgIdx(0);
     
-    // Cycle messages every 8 seconds
     const msgInterval = setInterval(() => {
       setRenderMsgIdx((prev) => (prev + 1) % RENDER_MESSAGES.length);
     }, 8000);
@@ -425,7 +429,7 @@ export default function CinematicListingApp() {
                   <h2 className="text-3xl font-bold text-white tracking-tight">Review Storyboard</h2>
                   <p className="text-neutral-400 mt-1">Adjust camera movements, captions, and property details.</p>
                 </div>
-                <button onClick={handleRenderVideo} disabled={isLoading} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold py-3 px-8 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-indigo-500/25 w-full md:w-auto justify-center">
+                <button onClick={handleRenderVideo} disabled={isLoading || !isCompliant} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold py-3 px-8 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-indigo-500/25 w-full md:w-auto justify-center disabled:opacity-50 disabled:cursor-not-allowed">
                   <Film className="w-4 h-4" /> Render HD Video
                 </button>
               </div>
@@ -440,8 +444,64 @@ export default function CinematicListingApp() {
                   </div>
                 </div>
 
-                <h3 className="text-sm font-semibold mb-5 text-neutral-300 uppercase tracking-wider">Property Details</h3>
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-4">
+                <h3 className="text-sm font-semibold mb-5 text-neutral-300 uppercase tracking-wider">Property Details & Compliance</h3>
+
+                {/* Compliance Toggle */}
+                <div className="mb-6 bg-neutral-950/50 p-4 rounded-xl border border-neutral-800">
+                  <label className="block text-sm font-medium text-neutral-300 mb-3">Is this your active listing?</label>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => setIsOwnListing(true)}
+                      className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${isOwnListing ? 'bg-indigo-500 text-white' : 'bg-neutral-900 text-neutral-400 border border-neutral-700'}`}
+                    >
+                      Yes, it's my listing
+                    </button>
+                    <button 
+                      onClick={() => setIsOwnListing(false)}
+                      className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${!isOwnListing ? 'bg-indigo-500 text-white' : 'bg-neutral-900 text-neutral-400 border border-neutral-700'}`}
+                    >
+                      No, I'm promoting it
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-500 mb-1.5">Your Phone (End Screen)</label>
+                    <input type="text" value={meta.phone} onChange={(e) => setMeta({...meta, phone: e.target.value})} placeholder="(555) 123-4567" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-500 mb-1.5">Your Website (End Screen)</label>
+                    <input type="text" value={meta.website} onChange={(e) => setMeta({...meta, website: e.target.value})} placeholder="www.example.com" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" />
+                  </div>
+                </div>
+
+                {/* Conditional Compliance Fields */}
+                {!isOwnListing && (
+                  <div className="mb-6 p-4 border border-amber-500/30 bg-amber-500/5 rounded-xl">
+                    <p className="text-xs text-amber-400 mb-4">You must provide listing attribution to stay compliant with local MLS rules.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">Listing Agent <span className="text-red-400">*</span></label>
+                        <input type="text" required value={meta.agent} onChange={(e) => setMeta({...meta, agent: e.target.value})} className="w-full bg-neutral-950 border border-amber-500/30 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none transition-all" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">Listing Brokerage <span className="text-red-400">*</span></label>
+                        <input type="text" required value={meta.brokerage} onChange={(e) => setMeta({...meta, brokerage: e.target.value})} className="w-full bg-neutral-950 border border-amber-500/30 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none transition-all" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">Data Source (e.g., MRED) <span className="text-red-400">*</span></label>
+                        <input type="text" required value={meta.mls_source} onChange={(e) => setMeta({...meta, mls_source: e.target.value})} className="w-full bg-neutral-950 border border-amber-500/30 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none transition-all" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">MLS Number <span className="text-red-400">*</span></label>
+                        <input type="text" required value={meta.mls_number} onChange={(e) => setMeta({...meta, mls_number: e.target.value})} className="w-full bg-neutral-950 border border-amber-500/30 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none transition-all" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                   <div className="col-span-1 md:col-span-2">
                     <label className="block text-xs font-medium text-neutral-500 mb-1.5">Property Address</label>
                     <input type="text" value={meta.address} onChange={(e) => setMeta({...meta, address: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" />
@@ -450,14 +510,6 @@ export default function CinematicListingApp() {
                   <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">Beds</label><input type="text" value={meta.beds} onChange={(e) => setMeta({...meta, beds: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
                   <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">Baths</label><input type="text" value={meta.baths} onChange={(e) => setMeta({...meta, baths: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
                   <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">SqFt</label><input type="text" value={meta.sqft} onChange={(e) => setMeta({...meta, sqft: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                  <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">Listing Agent</label><input type="text" value={meta.agent} onChange={(e) => setMeta({...meta, agent: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
-                  <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">Brokerage</label><input type="text" value={meta.brokerage} onChange={(e) => setMeta({...meta, brokerage: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
-                  <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">Phone (End Screen)</label><input type="text" value={meta.phone || ''} onChange={(e) => setMeta({...meta, phone: e.target.value})} placeholder="(555) 123-4567" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
-                  <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">MLS Source</label><input type="text" value={meta.mls_source} onChange={(e) => setMeta({...meta, mls_source: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
-                  <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">MLS Number</label><input type="text" value={meta.mls_number} onChange={(e) => setMeta({...meta, mls_number: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
                 </div>
               </div>
 

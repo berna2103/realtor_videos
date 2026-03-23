@@ -10,10 +10,6 @@ import PIL.Image
 import PIL.ImageDraw
 import PIL.ImageFont
 
-# Fix for MoviePy 1.0.3 & Pillow 10+
-if not hasattr(PIL.Image, 'ANTIALIAS'):
-    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
-
 from moviepy import (
     ImageClip, 
     CompositeVideoClip, 
@@ -24,6 +20,12 @@ from moviepy import (
     vfx, 
     afx
 )
+
+# Fix for MoviePy 1.0.3 & Pillow 10+
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
+
+
 
 # --- HELPER FUNCTIONS ---
 def hex_to_rgb(hex_color):
@@ -292,7 +294,7 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
                 
     return layers
 
-def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir):
+def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, website, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir):
     from PIL import Image, ImageDraw, ImageOps
     rgb_theme = hex_to_rgb(theme_color)
     
@@ -307,12 +309,14 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
 
     f_cta = get_font(font_choice, int(target_h * 0.045), base_dir)
     f_phone = get_font(font_choice, int(target_h * 0.065), base_dir)
+    f_website = get_font(font_choice, int(target_h * 0.035), base_dir)
     f_name = get_font(font_choice, int(target_h * 0.030), base_dir)
     f_broker = get_font(font_choice, int(target_h * 0.022), base_dir)
     f_mls = get_font(font_choice, int(target_h * 0.016), base_dir)
     
     cta_text = "¡AGENDA TU CITA!" if language == "Spanish" else "SCHEDULE A SHOWING!"
     phone_text = phone if phone else ""
+    website_text = website if website else ""
     agent_text = agent_name.upper() if agent_name else ""
     broker_text = brokerage if brokerage else ""
     mls_text = f"Source: {mls_source} | MLS# {mls_number}" if (mls_source or mls_number) else ""
@@ -336,12 +340,17 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
 
     cta_clip = _create_text_clip(cta_text, f_cta, (160, 160, 170), curr_y, fade_start, duration, job_id, "cta")
     if cta_clip: layers.append(cta_clip)
-    curr_y += 100
+    curr_y += 80
     fade_start += fade_step
 
     phone_clip = _create_text_clip(phone_text, f_phone, (255, 255, 255), curr_y, fade_start, duration, job_id, "phone")
     if phone_clip: layers.append(phone_clip)
-    curr_y += 100
+    curr_y += 70
+    fade_start += fade_step
+    
+    website_clip = _create_text_clip(website_text, f_website, (200, 200, 255), curr_y, fade_start, duration, job_id, "website")
+    if website_clip: layers.append(website_clip)
+    curr_y += 70
     fade_start += fade_step
 
     agent_clip = _create_text_clip(agent_text, f_name, (255, 255, 255), curr_y, fade_start, duration, job_id, "agent")
@@ -432,7 +441,7 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
             ))
 
         end_screen = create_end_screen(
-            job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), meta.get('phone',''), 5.0, 
+            job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), meta.get('phone',''), meta.get('website',''), 5.0, 
             req_dict.get('language','English'), meta.get('mls_source',''), meta.get('mls_number',''), 
             req_dict.get('font','Montserrat'), req_dict.get('primary_color','#552448'), base_dir
         )
@@ -446,11 +455,18 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
             music_file = os.path.join(base_dir, MUSIC_MAP[music_choice])
             if os.path.exists(music_file):
                 bg_music = AudioFileClip(music_file)
+                
                 if bg_music.duration < final.duration:
+                    # Loop the audio if it's too short
                     bg_music = concatenate_audioclips([bg_music] * (int(final.duration / bg_music.duration) + 1))
-                bg_music = bg_music.with_duration(final.duration).volumex(0.08)
-                if final.audio: final.audio = CompositeAudioClip([bg_music, final.audio])
-                else: final.audio = bg_music
+                
+                # MoviePy 2.x syntax for adjusting duration and volume
+                bg_music = bg_music.with_duration(final.duration).with_volume_scaled(0.08)
+                
+                if final.audio: 
+                    final.audio = CompositeAudioClip([bg_music, final.audio])
+                else: 
+                    final.audio = bg_music
 
         # SPEED OPTIMIZATION: threads=4 and ultrafast preset
         final.write_videofile(

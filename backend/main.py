@@ -58,6 +58,7 @@ class MetaDef(BaseModel):
     agent: str
     brokerage: str
     phone: str = ""  # Added so agents can input their own phone number
+    website: str = "" # Added so agents can input their own website
     mls_source: str
     mls_number: str
 
