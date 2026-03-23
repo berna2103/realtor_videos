@@ -5,7 +5,11 @@ import {
   Settings, Image as ImageIcon, Video, Upload, Trash2, ArrowUp, ArrowDown, 
   Play, Link as LinkIcon, Download, Share2, Loader2, CheckCircle2, ChevronRight, Palette
 } from 'lucide-react';
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// --- DYNAMIC API URL ---
+// Uses Vercel environment variable in production, defaults to localhost in development
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
 // --- TYPES ---
 interface Scene {
   id: string;
@@ -44,7 +48,7 @@ export default function CinematicListingApp() {
   const [music, setMusic] = useState('real_estate_upbeat'); 
   const [timingMode, setTimingMode] = useState('Auto');
   
-  // NEW: Brand Kit State
+  // Brand Kit State
   const [primaryColor, setPrimaryColor] = useState('#552448'); // Default Burgundy
   const [logoData, setLogoData] = useState<string | null>(null); // Base64 Logo
 
@@ -93,7 +97,7 @@ export default function CinematicListingApp() {
       setStep(2);
     } catch (error) {
       console.error(error);
-      alert("Failed to fetch data. Make sure FastAPI is running and CORS is configured!");
+      alert("Failed to fetch data. Make sure your backend is running and URL is correct!");
     } finally {
       setIsLoading(false);
     }
@@ -102,14 +106,14 @@ export default function CinematicListingApp() {
   const handleRenderVideo = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/render-video', {
+      const res = await fetch(`${API_URL}/api/render-video`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           meta, scenes, format, language, voice, font, music, timing_mode: timingMode,
           show_price: true, show_details: true, status_choice: statusChoice,
-          primary_color: primaryColor, // NEW: Send color
-          logo_data: logoData // NEW: Send Base64 Logo
+          primary_color: primaryColor,
+          logo_data: logoData
         })
       });
       
@@ -118,7 +122,7 @@ export default function CinematicListingApp() {
 
       const interval = setInterval(async () => {
         try {
-          const statusRes = await fetch(`http://127.0.0.1:8000/api/job-status/${jobId}`);
+          const statusRes = await fetch(`${API_URL}/api/job-status/${jobId}`);
           const statusData = await statusRes.json();
 
           if (statusData.status === 'completed') {
@@ -301,22 +305,21 @@ export default function CinematicListingApp() {
               </select>
             </div>
             
-            {/* RESTORED: Voice Actor Selection */}
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-neutral-400">Voice Actor</label>
               <select value={voice} onChange={(e) => setVoice(e.target.value)} className="w-full bg-neutral-950/50 border border-neutral-800 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
-                <option value="en-US-ChristopherNeural">👨 Christopher (Deep/Pro)</option>
-                <option value="en-US-JennyNeural">👩 Jenny (Friendly)</option>
-                <option value="es-MX-JorgeNeural">👨 Jorge (Mexico)</option>
+                <option value="en-US-ChristopherNeural">捉 Christopher (Deep/Pro)</option>
+                <option value="en-US-JennyNeural">束 Jenny (Friendly)</option>
+                <option value="es-MX-JorgeNeural">捉 Jorge (Mexico)</option>
               </select>
             </div>
 
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-neutral-400">Background Music</label>
               <select value={music} onChange={(e) => setMusic(e.target.value)} className="w-full bg-neutral-950/50 border border-neutral-800 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
-                <option value="none">🔇 No Music</option>
-                <option value="real_estate_upbeat">🎵 Real Estate Upbeat</option>
-                <option value="luxury_lifestyle">🎵 Luxury Lifestyle</option>
+                <option value="none">這 No Music</option>
+                <option value="real_estate_upbeat">七 Real Estate Upbeat</option>
+                <option value="luxury_lifestyle">七 Luxury Lifestyle</option>
               </select>
             </div>
           </div>
@@ -425,7 +428,6 @@ export default function CinematicListingApp() {
             <div className="max-w-4xl mx-auto mt-10 animate-in fade-in zoom-in-95 duration-700">
               <div className="text-center mb-8"><div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/10 mb-4"><CheckCircle2 className="w-8 h-8 text-emerald-500" /></div><h2 className="text-3xl font-bold text-white tracking-tight">Render Complete</h2></div>
               
-              {/* DYNAMIC VIDEO PLAYER: Changes shape based on the format selected */}
               <div className={`bg-black rounded-3xl overflow-hidden ring-1 ring-white/10 shadow-2xl shadow-indigo-500/10 mb-8 relative group max-h-[70vh] mx-auto flex justify-center ${
                 format.includes('Vertical') ? 'aspect-[9/16] w-auto' : 
                 format.includes('Square') ? 'aspect-square w-full max-w-2xl' : 
@@ -443,7 +445,7 @@ export default function CinematicListingApp() {
                 </div>
                 <button className="flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold py-3.5 px-8 rounded-xl transition-all shadow-lg shadow-[#1877F2]/20 w-full sm:w-auto"><Share2 className="w-5 h-5" /> Post to Facebook</button>
               </div>
-              <div className="mt-12 bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 backdrop-blur-sm"><h3 className="text-sm font-semibold mb-3 text-neutral-300 flex items-center gap-2"><span>📝</span> Suggested Post Copy</h3><textarea readOnly value={fbDraft} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-sm h-28 resize-none text-neutral-400 focus:outline-none focus:border-indigo-500 transition-colors leading-relaxed" /></div>
+              <div className="mt-12 bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 backdrop-blur-sm"><h3 className="text-sm font-semibold mb-3 text-neutral-300 flex items-center gap-2"><span>統</span> Suggested Post Copy</h3><textarea readOnly value={fbDraft} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-sm h-28 resize-none text-neutral-400 focus:outline-none focus:border-indigo-500 transition-colors leading-relaxed" /></div>
             </div>
           )}
         </div>
