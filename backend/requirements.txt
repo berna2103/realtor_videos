@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+pydantic
+moviepy>=2.0.0
+Pillow>=10.0.0
+edge-tts
+google-genai
+python-dotenv
+requests
+proglog
