@@ -1,16 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Settings, Image as ImageIcon, Video, Upload, Trash2, ArrowUp, ArrowDown, 
-  Play, Link as LinkIcon, Download, Share2, Loader2, CheckCircle2, ChevronRight, Palette
+  Play, Link as LinkIcon, Download, Share2, Loader2, CheckCircle2, ChevronRight, Palette,
+  Clock, Sparkles, Film
 } from 'lucide-react';
 
-// --- DYNAMIC API URL ---
-// Uses Vercel environment variable in production, defaults to localhost in development
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-// --- TYPES ---
 interface Scene {
   id: string;
   image_path: string;
@@ -22,25 +20,32 @@ interface Scene {
 }
 
 interface Meta {
-  address: string;
-  price: string;
-  beds: string;
-  baths: string;
-  sqft: string;
-  agent: string;
-  brokerage: string;
-  mls_source: string;
-  mls_number: string;
+  address: string; price: string; beds: string; baths: string; sqft: string;
+  agent: string; brokerage: string; mls_source: string; mls_number: string;
 }
 
+const RENDER_MESSAGES = [
+  "Spinning up the render engine...",
+  "Downloading high-resolution photos...",
+  "Generating AI voiceovers...",
+  "Applying cinematic camera movements...",
+  "Adding text overlays and branding...",
+  "Stitching video frames... (This takes the longest)",
+  "Mixing the audio tracks...",
+  "Encoding final HD video...",
+  "Almost there! Please don't close this tab..."
+];
+
 export default function CinematicListingApp() {
-  // --- STATE ---
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [isLoading, setIsLoading] = useState(false);
   const [zillowUrl, setZillowUrl] = useState('');
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
-  // Settings State
+  // New Rendering UX States
+  const [isRendering, setIsRendering] = useState(false);
+  const [renderMsgIdx, setRenderMsgIdx] = useState(0);
+
   const [format, setFormat] = useState('Vertical (1080x1920)');
   const [language, setLanguage] = useState('English');
   const [voice, setVoice] = useState('en-US-ChristopherNeural');
@@ -48,11 +53,9 @@ export default function CinematicListingApp() {
   const [music, setMusic] = useState('real_estate_upbeat'); 
   const [timingMode, setTimingMode] = useState('Auto');
   
-  // Brand Kit State
-  const [primaryColor, setPrimaryColor] = useState('#552448'); // Default Burgundy
-  const [logoData, setLogoData] = useState<string | null>(null); // Base64 Logo
+  const [primaryColor, setPrimaryColor] = useState('#552448');
+  const [logoData, setLogoData] = useState<string | null>(null);
 
-  // Listing Data State
   const [meta, setMeta] = useState<Meta>({
     address: '', price: '', beds: '', baths: '', sqft: '', agent: '', brokerage: '', mls_source: '', mls_number: ''
   });
@@ -60,25 +63,20 @@ export default function CinematicListingApp() {
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [statusChoice, setStatusChoice] = useState('Just Listed');
 
-  // Download State
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
-  // --- BRAND KIT HELPERS ---
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setLogoData(reader.result as string);
-      };
+      reader.onloadend = () => setLogoData(reader.result as string);
       reader.readAsDataURL(file);
     }
   };
 
   const removeLogo = () => setLogoData(null);
 
-  // --- REAL API ACTIONS ---
   const handleFetchData = async () => {
     setIsLoading(true);
     try {
@@ -104,7 +102,14 @@ export default function CinematicListingApp() {
   };
 
   const handleRenderVideo = async () => {
-    setIsLoading(true);
+    setIsRendering(true); // Trigger the cinematic loading screen
+    setRenderMsgIdx(0);
+    
+    // Cycle messages every 8 seconds
+    const msgInterval = setInterval(() => {
+      setRenderMsgIdx((prev) => (prev + 1) % RENDER_MESSAGES.length);
+    }, 8000);
+
     try {
       const res = await fetch(`${API_URL}/api/render-video`, {
         method: 'POST',
@@ -112,28 +117,38 @@ export default function CinematicListingApp() {
         body: JSON.stringify({ 
           meta, scenes, format, language, voice, font, music, timing_mode: timingMode,
           show_price: true, show_details: true, status_choice: statusChoice,
-          primary_color: primaryColor,
-          logo_data: logoData
+          primary_color: primaryColor, logo_data: logoData
         })
       });
       
       const data = await res.json();
       const jobId = data.job_id;
 
-      const interval = setInterval(async () => {
+      const pollInterval = setInterval(async () => {
         try {
           const statusRes = await fetch(`${API_URL}/api/job-status/${jobId}`);
+          
+          if (!statusRes.ok) {
+            clearInterval(pollInterval);
+            clearInterval(msgInterval);
+            alert('Connection lost or server restarted. The render failed.');
+            setIsRendering(false);
+            return;
+          }
+
           const statusData = await statusRes.json();
 
           if (statusData.status === 'completed') {
-            clearInterval(interval);
+            clearInterval(pollInterval);
+            clearInterval(msgInterval);
             setVideoUrl(statusData.video_url);
-            setIsLoading(false);
+            setIsRendering(false);
             setStep(3);
           } else if (statusData.status === 'failed') {
-            clearInterval(interval);
+            clearInterval(pollInterval);
+            clearInterval(msgInterval);
             alert('Render failed: ' + statusData.error);
-            setIsLoading(false);
+            setIsRendering(false);
           }
         } catch (e) {
           console.error("Polling error", e);
@@ -142,8 +157,9 @@ export default function CinematicListingApp() {
 
     } catch (error) {
       console.error(error);
+      clearInterval(msgInterval);
       alert("Failed to connect to the render engine.");
-      setIsLoading(false);
+      setIsRendering(false);
     }
   };
 
@@ -194,8 +210,7 @@ export default function CinematicListingApp() {
     }
   };
 
-  // --- SCENE HELPERS ---
-  const updateScene = (index: number, field: keyof Scene, value: unknown) => {
+  const updateScene = (index: number, field: keyof Scene, value: any) => {
     const newScenes = [...scenes];
     newScenes[index] = { ...newScenes[index], [field]: value };
     setScenes(newScenes);
@@ -241,7 +256,6 @@ export default function CinematicListingApp() {
         </div>
 
         <div className="space-y-6 flex-1">
-          {/* BRAND KIT SECTION */}
           <div className="space-y-4">
             <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
               <Palette className="w-3.5 h-3.5" /> Brand Kit
@@ -276,7 +290,6 @@ export default function CinematicListingApp() {
 
           <hr className="border-neutral-800/60" />
 
-          {/* PROJECT SETTINGS SECTION */}
           <div className="space-y-4">
             <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
               <Settings className="w-3.5 h-3.5" /> Media Settings
@@ -308,24 +321,24 @@ export default function CinematicListingApp() {
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-neutral-400">Voice Actor</label>
               <select value={voice} onChange={(e) => setVoice(e.target.value)} className="w-full bg-neutral-950/50 border border-neutral-800 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
-                <option value="en-US-ChristopherNeural">捉 Christopher (Deep/Pro)</option>
-                <option value="en-US-JennyNeural">束 Jenny (Friendly)</option>
-                <option value="es-MX-JorgeNeural">捉 Jorge (Mexico)</option>
+                <option value="en-US-ChristopherNeural">🇺🇸 Christopher (Deep/Pro)</option>
+                <option value="en-US-JennyNeural">🇺🇸 Jenny (Friendly)</option>
+                <option value="es-MX-JorgeNeural">🇲🇽 Jorge (Mexico)</option>
               </select>
             </div>
 
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-neutral-400">Background Music</label>
               <select value={music} onChange={(e) => setMusic(e.target.value)} className="w-full bg-neutral-950/50 border border-neutral-800 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all">
-                <option value="none">這 No Music</option>
-                <option value="real_estate_upbeat">七 Real Estate Upbeat</option>
-                <option value="luxury_lifestyle">七 Luxury Lifestyle</option>
+                <option value="none">🔇 No Music</option>
+                <option value="real_estate_upbeat">🎵 Real Estate Upbeat</option>
+                <option value="luxury_lifestyle">🎵 Luxury Lifestyle</option>
               </select>
             </div>
           </div>
         </div>
 
-        {step > 1 && (
+        {step > 1 && !isRendering && (
           <button onClick={() => { setStep(1); setScenes([]); }} className="mt-auto w-full py-2.5 px-4 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 rounded-lg text-sm text-neutral-300 transition-all">
             Start Over
           </button>
@@ -333,16 +346,54 @@ export default function CinematicListingApp() {
       </aside>
 
       {/* MAIN CONTENT AREA */}
-      <main className="flex-1 p-6 md:p-10 overflow-y-auto order-1 md:order-2 relative">
+      <main className="flex-1 p-6 md:p-10 overflow-y-auto order-1 md:order-2 relative flex flex-col">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-indigo-500/10 blur-[120px] rounded-full pointer-events-none" />
-        <div className="relative z-10 max-w-5xl mx-auto">
-          <StepIndicator />
+        
+        <div className="relative z-10 max-w-5xl mx-auto w-full">
+          {!isRendering && <StepIndicator />}
+
+          {/* RENDERING OVERLAY (Overrides UI during video creation) */}
+          {isRendering && (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] animate-in fade-in zoom-in-95 duration-700">
+              <div className="relative mb-8">
+                <div className="absolute inset-0 bg-indigo-500 blur-2xl opacity-20 rounded-full animate-pulse" />
+                <div className="w-24 h-24 bg-neutral-900 border-2 border-indigo-500/50 rounded-full flex items-center justify-center relative z-10">
+                  <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
+                </div>
+              </div>
+              
+              <h2 className="text-3xl md:text-4xl font-bold text-white mb-4 text-center">
+                Rendering your video...
+              </h2>
+              
+              <div className="h-8 flex items-center justify-center mb-8">
+                <p className="text-xl text-indigo-300 animate-pulse text-center" key={renderMsgIdx}>
+                  {RENDER_MESSAGES[renderMsgIdx]}
+                </p>
+              </div>
+
+              <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 max-w-md w-full backdrop-blur-md">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-amber-500/10 rounded-xl">
+                    <Clock className="w-6 h-6 text-amber-500" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white mb-1">Do not close this tab!</h4>
+                    <p className="text-sm text-neutral-400 leading-relaxed">
+                      HD video rendering is highly demanding. Depending on the number of photos, this process can take <strong className="text-white">up to 5 minutes</strong> to complete. 
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* STEP 1: FETCH */}
-          {step === 1 && (
+          {step === 1 && !isRendering && (
             <div className="max-w-2xl mx-auto mt-16 text-center animate-in fade-in slide-in-from-bottom-4 duration-700">
               <h2 className="text-4xl md:text-5xl font-extrabold mb-4 text-white tracking-tight">Automate your listings.</h2>
-              <p className="text-lg text-neutral-400 mb-10">Paste a Zillow URL. We will extract the photos, analyze the rooms, and build a cinematic storyboard instantly.</p>
+              <p className="text-lg text-neutral-400 mb-10">Paste a Zillow URL. We'll extract the photos, analyze the rooms, and build a cinematic storyboard instantly.</p>
+              
               <div className="p-2 bg-neutral-900/50 backdrop-blur-md rounded-2xl border border-neutral-800 shadow-2xl flex flex-col sm:flex-row gap-2">
                 <div className="relative flex-1">
                   <LinkIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
@@ -352,11 +403,21 @@ export default function CinematicListingApp() {
                   {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Generate Script'}
                 </button>
               </div>
+
+              {/* NEW: Zillow Fetching Loading Badge */}
+              {isLoading && (
+                <div className="mt-8 flex justify-center animate-in fade-in slide-in-from-top-4 duration-500">
+                  <div className="flex items-center gap-3 bg-indigo-500/10 border border-indigo-500/20 px-5 py-3 rounded-full text-sm font-medium text-indigo-300 shadow-lg shadow-indigo-500/5">
+                    <Sparkles className="w-4 h-4 animate-pulse text-indigo-400" />
+                    Extracting photos and running AI analysis... (approx. 15 sec)
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* STEP 2: EDIT STORYBOARD */}
-          {step === 2 && (
+          {step === 2 && !isRendering && (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div>
@@ -364,7 +425,7 @@ export default function CinematicListingApp() {
                   <p className="text-neutral-400 mt-1">Adjust camera movements, captions, and property details.</p>
                 </div>
                 <button onClick={handleRenderVideo} disabled={isLoading} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold py-3 px-8 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-indigo-500/25 w-full md:w-auto justify-center">
-                  {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Play className="w-4 h-4" /> Render Video</>}
+                  <Film className="w-4 h-4" /> Render HD Video
                 </button>
               </div>
 
@@ -390,9 +451,10 @@ export default function CinematicListingApp() {
                   <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">SqFt</label><input type="text" value={meta.sqft} onChange={(e) => setMeta({...meta, sqft: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">Listing Agent Credit</label><input type="text" value={meta.agent} onChange={(e) => setMeta({...meta, agent: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
-                  <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">Brokerage Credit</label><input type="text" value={meta.brokerage} onChange={(e) => setMeta({...meta, brokerage: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">Listing Agent</label><input type="text" value={meta.agent} onChange={(e) => setMeta({...meta, agent: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
+                  <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">Brokerage</label><input type="text" value={meta.brokerage} onChange={(e) => setMeta({...meta, brokerage: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
+                  <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">Phone (End Screen)</label><input type="text" value={meta.phone || ''} onChange={(e) => setMeta({...meta, phone: e.target.value})} placeholder="(555) 123-4567" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
                   <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">MLS Source</label><input type="text" value={meta.mls_source} onChange={(e) => setMeta({...meta, mls_source: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
                   <div><label className="block text-xs font-medium text-neutral-500 mb-1.5">MLS Number</label><input type="text" value={meta.mls_number} onChange={(e) => setMeta({...meta, mls_number: e.target.value})} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all" /></div>
                 </div>
@@ -424,7 +486,7 @@ export default function CinematicListingApp() {
           )}
 
           {/* STEP 3: RESULT */}
-          {step === 3 && videoUrl && (
+          {step === 3 && videoUrl && !isRendering && (
             <div className="max-w-4xl mx-auto mt-10 animate-in fade-in zoom-in-95 duration-700">
               <div className="text-center mb-8"><div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/10 mb-4"><CheckCircle2 className="w-8 h-8 text-emerald-500" /></div><h2 className="text-3xl font-bold text-white tracking-tight">Render Complete</h2></div>
               
@@ -445,7 +507,7 @@ export default function CinematicListingApp() {
                 </div>
                 <button className="flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold py-3.5 px-8 rounded-xl transition-all shadow-lg shadow-[#1877F2]/20 w-full sm:w-auto"><Share2 className="w-5 h-5" /> Post to Facebook</button>
               </div>
-              <div className="mt-12 bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 backdrop-blur-sm"><h3 className="text-sm font-semibold mb-3 text-neutral-300 flex items-center gap-2"><span>統</span> Suggested Post Copy</h3><textarea readOnly value={fbDraft} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-sm h-28 resize-none text-neutral-400 focus:outline-none focus:border-indigo-500 transition-colors leading-relaxed" /></div>
+              <div className="mt-12 bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 backdrop-blur-sm"><h3 className="text-sm font-semibold mb-3 text-neutral-300 flex items-center gap-2"><span>📝</span> Suggested Post Copy</h3><textarea readOnly value={fbDraft} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-sm h-28 resize-none text-neutral-400 focus:outline-none focus:border-indigo-500 transition-colors leading-relaxed" /></div>
             </div>
           )}
         </div>
