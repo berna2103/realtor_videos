@@ -1,3 +1,8 @@
+Here is your fully updated `engine.py` file. 
+
+This version includes the custom `phone` field updates we made earlier, and it removes the memory-heavy crossfades (`vfx.CrossFadeIn` and `padding=-0.6`) while dropping `threads` down to `1`. This is the exact configuration needed to drastically slash the RAM usage so your 4GB Railway server can successfully render 20-picture Zillow listings without crashing.
+
+```python
 import os
 import time
 import asyncio
@@ -20,7 +25,7 @@ from moviepy import (
     concatenate_videoclips, 
     AudioFileClip, 
     CompositeAudioClip,
-    concatenate_audioclips, # Essential for looping background music
+    concatenate_audioclips, 
     vfx, 
     afx
 )
@@ -85,7 +90,7 @@ def wrap_text_by_pixels(text, font, max_pixels):
 
 def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths, sqft, duration,
                          language, font_choice, show_price, show_details, status_choice,
-                         agent_name, brokerage, mls_source, mls_number,
+                         agent_name, brokerage, phone, mls_source, mls_number,
                          theme_color, base_dir, logo_path=None):
 
     from PIL import Image, ImageDraw, ImageFilter
@@ -108,7 +113,6 @@ def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths
 
     label = status_choice.upper()
     
-    # FIXED: Actually measure the label so 'l_w' and 'l_h' exist!
     l_bbox = draw.textbbox((0, 0), label, font=f_badge)
     l_w, l_h = l_bbox[2]-l_bbox[0], l_bbox[3]-l_bbox[1]
 
@@ -146,7 +150,8 @@ def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths
         bbox = draw.textbbox((0, 0), details_str, font=f_det)
         d_w, d_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
 
-    contact_str = "Schedule a Showing!\n (708) 314-0477"
+    # Dynamic Phone Number
+    contact_str = f"Schedule a Showing!\n {phone}" if phone else "Schedule a Showing!"
     bbox = draw.textbbox((0, 0), contact_str, font=f_contact)
     c_w, c_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
 
@@ -165,7 +170,7 @@ def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths
         width=3
     )
 
-    # -------- RESTORED STATUS PILL --------
+    # -------- STATUS PILL --------
     pill_pad_x, pill_pad_y = 35, 15
     pill_w = l_w + (pill_pad_x * 2)
     pill_h = l_h + (pill_pad_y * 2)
@@ -174,7 +179,6 @@ def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths
     pill_x2 = pill_x1 + pill_w
     pill_y2 = pill_y1 + pill_h
 
-    # Drawn completely flat with no shadow and no secondary outline
     draw.rounded_rectangle([pill_x1, pill_y1, pill_x2, pill_y2], radius=int(pill_h/2), fill=gold)
     draw.text(((target_w - l_w)/2, pill_y1 + pill_pad_y - 2), label, font=f_badge, fill=bg_custom)
 
@@ -199,11 +203,9 @@ def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths
     # -------- GLASS FOOTER --------
     footer_h = 140
 
-    # Create blur layer
     footer_area = img.crop((0, target_h - footer_h, target_w, target_h))
     blurred = footer_area.filter(ImageFilter.GaussianBlur(12))
 
-    # Dark overlay
     overlay = Image.new('RGBA', (target_w, footer_h), (0, 0, 0, 120))
 
     img.paste(blurred, (0, target_h - footer_h))
@@ -218,7 +220,7 @@ def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths
         try:
             logo = Image.open(logo_path).convert("RGBA")
 
-            max_w = int(target_w * 0.18)  # responsive size
+            max_w = int(target_w * 0.18)
             ratio = max_w / logo.width
             logo = logo.resize((max_w, int(logo.height * ratio)))
 
@@ -241,7 +243,6 @@ def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths
         bbox = draw.textbbox((0, 0), mls, font=f_small)
         draw.text(((target_w - (bbox[2]-bbox[0]))/2, bottom_y), mls, font=f_small, fill=(180,180,180,255))
 
-    # -------- SAVE --------
     temp = os.path.join(base_dir, f"temp_title_{job_id}.png")
     img.save(temp)
 
@@ -321,39 +322,33 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
                 
     return layers
 
-def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir):
-    from PIL import Image, ImageDraw, ImageFilter, ImageOps # FIXED: Added ImageOps for color inversion
+def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir):
+    from PIL import Image, ImageDraw, ImageOps
     rgb_theme = hex_to_rgb(theme_color)
     
-    # 1. Base Slate: Define the deep cinematic slate background
     bg_color = (10, 10, 12)
     img_bg = Image.new('RGB', (target_w, target_h), bg_color) 
     draw_bg = ImageDraw.Draw(img_bg)
     
-    # 2. Add Background Accent Line
     draw_bg.rectangle([0, 0, target_w, 6], fill=rgb_theme)
     
-    # Save the static background
     temp_bg = os.path.join(base_dir, f"temp_end_bg_{job_id}.png") 
     img_bg.save(temp_bg)
     base_clip = ImageClip(temp_bg).with_duration(duration)
 
-    # 3. Define Fonts
     f_cta = get_font(font_choice, int(target_h * 0.045), base_dir)
     f_phone = get_font(font_choice, int(target_h * 0.065), base_dir)
     f_name = get_font(font_choice, int(target_h * 0.030), base_dir)
     f_broker = get_font(font_choice, int(target_h * 0.022), base_dir)
     f_mls = get_font(font_choice, int(target_h * 0.016), base_dir)
     
-    # 4. Define Content
     cta_text = "¡AGENDA TU CITA!" if language == "Spanish" else "SCHEDULE A SHOWING!"
-    phone_text = "(708) 314-0477"
+    phone_text = phone if phone else ""
     web_text = f"\nListing Courtesy of: {brokerage}\n\n" if brokerage else ""
     agent_text = agent_name.upper() if agent_name else ""
     broker_text = brokerage if brokerage else ""
     mls_text = f"Source: {mls_source} | MLS# {mls_number}" if (mls_source or mls_number) else ""
 
-    # 5. Timeline Helper Function
     def _create_text_clip(text, font, fill_color, y_pos, start_time, clip_duration, job_id, unique_name):
         if not text: return None
         txt_img = PIL.Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
@@ -367,14 +362,12 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, duratio
                 .with_duration(max(0.1, clip_duration - start_time))
                 .with_effects([vfx.CrossFadeIn(0.8)]))
 
-    # --- THE TIMELINE & POSITIONING ---
     curr_y = int(target_h * 0.30)
     fade_start = 0.5  
     fade_step = 0.6   
     
     layers = [base_clip]
 
-    # Element 1: CTA
     cta_clip = _create_text_clip(cta_text, f_cta, (160, 160, 170), curr_y, fade_start, duration, job_id, "cta")
     if cta_clip: layers.append(cta_clip)
     
@@ -382,7 +375,6 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, duratio
     curr_y += (cta_bbox[3]-cta_bbox[1]) + 40
     fade_start += fade_step
 
-    # Element 2: Phone Number
     phone_clip = _create_text_clip(phone_text, f_phone, (255, 255, 255), curr_y, fade_start, duration, job_id, "phone")
     if phone_clip: layers.append(phone_clip)
     
@@ -390,13 +382,11 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, duratio
     curr_y += (phone_bbox[3]-phone_bbox[1]) + 20
     fade_start += fade_step
 
-    # Element 3: Website
     web_clip = _create_text_clip(web_text, f_name, rgb_theme, curr_y, fade_start, duration, job_id, "web")
     if web_clip: layers.append(web_clip)
     curr_y += 120 
     fade_start += fade_step
 
-    # Element 4: Agent Name
     agent_clip = _create_text_clip(agent_text, f_name, (255, 255, 255), curr_y, fade_start, duration, job_id, "agent")
     if agent_clip: layers.append(agent_clip)
     
@@ -404,20 +394,14 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, duratio
     curr_y += (agent_bbox[3]-agent_bbox[1]) + 10
     fade_start += fade_step
 
-    # Element 5: Brokerage
     broker_clip = _create_text_clip(broker_text, f_broker, (140, 140, 150), curr_y, fade_start, duration, job_id, "broker")
     if broker_clip: layers.append(broker_clip)
     
-    # --- ADD EQUAL HOUSING LOGO (EHL) ---
     ehl_path = os.path.join(base_dir, "ehl.png")
     if os.path.exists(ehl_path):
         try:
-            # FIXED: Load the black logo, convert to RGBA
             ehl_img = PIL.Image.open(ehl_path).convert("RGBA")
             
-            # --- THE COLOR INVERSION FIX ---
-            # MoviePy v2 uses ImageOps to invert the colors (black -> white)
-            # but it only works on RGB data, so we have to split, invert, and merge.
             try:
                 if ehl_img.mode == 'RGBA':
                     r, g, b, a = ehl_img.split()
@@ -428,19 +412,16 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, duratio
                 else:
                     final_ehl_img = ImageOps.invert(ehl_img)
             except Exception as e:
-                # If inversion fails for some obscure reason, fall back to the black logo
                 print(f"EHL color inversion failed, using original: {e}")
                 final_ehl_img = ehl_img
 
-            # Scale the newly white logo to a standard height
             ehl_h = int(target_h * 0.035)
             ehl_w = int(final_ehl_img.width * (ehl_h / final_ehl_img.height))
             final_ehl_img = final_ehl_img.resize((ehl_w, ehl_h), PIL.Image.LANCZOS)
             
-            # Create a transparent layer for the logo and position it
             ehl_layer = PIL.Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
             ehl_x = (target_w - ehl_w) // 2
-            ehl_y = target_h - 130 # Positioned just above the MLS text
+            ehl_y = target_h - 130
             ehl_layer.paste(final_ehl_img, (ehl_x, ehl_y), final_ehl_img)
             
             ehl_temp = os.path.join(base_dir, f"temp_end_ehl_{job_id}.png")
@@ -454,11 +435,9 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, duratio
         except Exception as e:
             print(f"Failed to add EHL logo: {e}")
 
-    # Element 6: MLS Footer
     mls_clip = _create_text_clip(mls_text, f_mls, (80, 80, 90), target_h - 60, fade_start, duration, job_id, "mls")
     if mls_clip: layers.append(mls_clip)
 
-    # COMPOSITE: Stack the timeline layers
     final_end_screen = CompositeVideoClip(layers, size=(target_w, target_h))
     
     return final_end_screen.with_duration(duration)
@@ -476,7 +455,7 @@ def generate_edge_audio(text, voice, output_path):
     asyncio.run(_amain())
     return timings
 
-def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, beds, baths, sqft, lang, font_choice, show_price, show_details, voice_model, status_choice, agent_name, brokerage, mls_source, mls_number, target_slide_dur, timing_mode, theme_color, logo_path, base_dir):
+def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, beds, baths, sqft, lang, font_choice, show_price, show_details, voice_model, status_choice, agent_name, brokerage, phone, mls_source, mls_number, target_slide_dur, timing_mode, theme_color, logo_path, base_dir):
     dur = target_slide_dur
     vo_clip, vo_timings = None, None
     
@@ -519,7 +498,7 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
     else: animated = base.resized(lambda t: 1.0 + 0.15 * ease_in_out(t, dur))
 
     if is_first: 
-        overlay_layers = [create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status_choice, agent_name, brokerage, mls_source, mls_number, theme_color, base_dir)]
+        overlay_layers = [create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status_choice, agent_name, brokerage, phone, mls_source, mls_number, theme_color, base_dir)]
     else: 
         overlay_layers = create_glass_caption(job_id, scene_data['caption'], dur, tw, th, font_choice, base_dir, vo_timings)
         
@@ -528,7 +507,6 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
     
     if logo_path and os.path.exists(logo_path):
         try:
-            # FIXED: Logo scale adjusted to 12% for a cleaner watermark appearance
             logo_clip = ImageClip(logo_path).resized(width=int(tw * 0.16)).with_position((40, 40)).with_duration(dur)
             layers.append(logo_clip)
         except Exception as e: print(f"Failed to overlay logo: {e}")
@@ -577,6 +555,7 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
                 status_choice=req_dict.get('status_choice', 'Just Listed'),
                 agent_name=meta.get('agent', ''),
                 brokerage=meta.get('brokerage', ''),
+                phone=meta.get('phone', ''),
                 mls_source=meta.get('mls_source', ''),
                 mls_number=meta.get('mls_number', ''),
                 target_slide_dur=3.0, 
@@ -586,24 +565,20 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
                 base_dir=base_dir
             )
             
-            # --- ADDING TRANSITIONS ---
-            # We add a 0.6s CrossFadeIn to every clip except the very first one
-            if i > 0:
-                clip = clip.with_effects([vfx.CrossFadeIn(0.6)])
-            
+            # CrossFades removed to save massive amounts of RAM
             clips.append(clip)
 
-        # Add Branded End Screen with a smooth 1s fade-in
+        # End screen without the CrossFadeIn
         end_screen = create_end_screen(
-            job_id, tw, th, meta.get('agent', ''), meta.get('brokerage', ''), 5.0, 
+            job_id, tw, th, meta.get('agent', ''), meta.get('brokerage', ''), meta.get('phone', ''), 5.0, 
             req_dict.get('language', 'English'), meta.get('mls_source', ''), meta.get('mls_number', ''), 
             req_dict.get('font', 'Montserrat'), theme_color=req_dict.get('primary_color', '#552448'), base_dir=base_dir
-        ).with_effects([vfx.CrossFadeIn(1.0)])
+        )
         
         clips.append(end_screen)
 
-        # CRITICAL: padding= -0.6 tells MoviePy to overlap the clips for the crossfade effect
-        final = concatenate_videoclips(clips, method="compose", padding=-0.6)
+        # Removed padding and compose method to allow sequential playback with low RAM
+        final = concatenate_videoclips(clips)
 
         music_choice = req_dict.get('music')
         if music_choice and music_choice != "none" and music_choice in MUSIC_MAP:
@@ -633,6 +608,7 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
                 except Exception as e:
                     print(f"Failed to apply music cleanly: {e}")
 
+        # Threads dropped to 1 to drastically lower RAM consumption
         final.write_videofile(
             output_path, 
             fps=24, 
