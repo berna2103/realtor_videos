@@ -5,7 +5,7 @@ import {
   Settings, Image as ImageIcon, Video, Upload, Trash2, ArrowUp, ArrowDown, 
   Play, Link as LinkIcon, Download, Share2, Loader2, CheckCircle2, ChevronRight, Palette
 } from 'lucide-react';
-
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 // --- TYPES ---
 interface Scene {
   id: string;
@@ -78,7 +78,7 @@ export default function CinematicListingApp() {
   const handleFetchData = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/fetch-zillow', {
+      const response = await fetch(`${API_URL}/api/fetch-zillow`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ zillowUrl, language })

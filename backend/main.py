@@ -7,24 +7,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Imports moved cleanly to the top
 from engine import render_cinematic_video
 from scraper import fetch_zillow_data, analyze_image_with_gemini, generate_fb_post_content
 
 app = FastAPI(title="Cinematic Listing AI Backend")
 
+# --- 0. DYNAMIC DOMAIN FOR RAILWAY ---
+# This ensures images and videos load whether you are testing locally or live on Railway
+def get_base_url():
+    domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    if domain:
+        return f"https://{domain}"
+    return "http://127.0.0.1:8000"
+
 # --- 1. CORS CONFIGURATION ---
-# This allows your Next.js frontend to talk to this backend
+# Open CORS allows your Vercel frontend to talk to this backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], 
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # --- 2. DIRECTORY SETUP ---
-# Consolidated and cleaned up to prevent mounting crashes
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 INPUT_DIR = os.path.join(BASE_DIR, "raw_photos")
@@ -32,7 +38,6 @@ INPUT_DIR = os.path.join(BASE_DIR, "raw_photos")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(INPUT_DIR, exist_ok=True)
 
-# Mount the directories ONCE
 app.mount("/outputs", StaticFiles(directory=OUTPUT_DIR), name="outputs")
 app.mount("/raw_photos", StaticFiles(directory=INPUT_DIR), name="raw_photos")
 
@@ -52,6 +57,7 @@ class MetaDef(BaseModel):
     sqft: str
     agent: str
     brokerage: str
+    phone: str = ""  # Added so agents can input their own phone number
     mls_source: str
     mls_number: str
 
@@ -69,7 +75,6 @@ class RenderRequest(BaseModel):
     format: Optional[str] = "Vertical (1080x1920)"
     language: Optional[str] = "English"
     voice: Optional[str] = "en-US-ChristopherNeural"
-    # Restored branding fields so they don't get deleted by FastAPI!
     font: Optional[str] = "Montserrat"
     music: Optional[str] = "none"
     timing_mode: str = "Auto"
@@ -87,13 +92,13 @@ def background_render_task(job_id: str, req: RenderRequest):
         output_filename = f"listing_{job_id}.mp4"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
 
-        # Execute the MoviePy render
         success = render_cinematic_video(job_id, req, output_path, BASE_DIR)
 
         if success:
             jobs[job_id]["status"] = "completed"
             jobs[job_id]["progress"] = 100
-            jobs[job_id]["video_url"] = f"http://localhost:8000/outputs/{output_filename}"
+            # Use dynamic URL for the final video output
+            jobs[job_id]["video_url"] = f"{get_base_url()}/outputs/{output_filename}"
 
     except Exception as e:
         jobs[job_id]["status"] = "failed"
@@ -105,24 +110,21 @@ def background_render_task(job_id: str, req: RenderRequest):
 async def fetch_zillow(req: FetchRequest):
     """Fetches real Zillow data, downloads images, and runs Gemini analysis."""
     try:
-        # 1. Scrape Zillow and download images
         meta_data, downloaded_images = fetch_zillow_data(req.zillowUrl)
-        
-        # 2. Generate the Facebook Post
         fb_draft = generate_fb_post_content(meta_data, req.language)
         
-        # 3. Analyze each downloaded image with Gemini
+        base_url = get_base_url()
         scenes = []
+        
         for img_path in downloaded_images:
             analysis = analyze_image_with_gemini(img_path, req.language, meta_data.get('description', ''))
-            
-            # Extract just the filename (e.g., "00_zillow.jpg")
             filename = os.path.basename(img_path)
             
             scenes.append({
                 "id": str(uuid.uuid4()),
                 "image_path": img_path, 
-                "image_url": f"http://127.0.0.1:8000/raw_photos/{filename}", 
+                # Use dynamic URL for images displayed in the Next.js UI
+                "image_url": f"{base_url}/raw_photos/{filename}", 
                 "room_type": analysis.get("room_type", "Room"),
                 "caption": analysis.get("caption", "Beautiful Home"),
                 "effect": analysis.get("effect", "zoom_in"),
