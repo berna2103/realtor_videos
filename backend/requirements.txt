@@ -9,3 +9,4 @@ google-genai
 python-dotenv
 requests
 proglog
+supabase
