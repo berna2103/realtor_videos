@@ -520,7 +520,7 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
                     final.audio = bg_music
 
         final.write_videofile(
-            output_path, fps=24, codec="libx264", audio_codec="aac", 
+            output_path, fps=24, codec="libx264", audio_codec="aac", bitrate="3000k",
             threads=4, preset="ultrafast", logger=None, ffmpeg_params=["-movflags", "faststart"]
         )
         return True
