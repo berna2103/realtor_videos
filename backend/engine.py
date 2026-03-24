@@ -5,10 +5,12 @@ import hashlib
 import base64
 import glob
 import io
+import threading
 import edge_tts
-import PIL.Image
-import PIL.ImageDraw
-import PIL.ImageFont
+import numpy as np
+import requests
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from moviepy import (
     ImageClip, 
@@ -21,9 +23,10 @@ from moviepy import (
     afx
 )
 
+
 # Fix for MoviePy 1.0.3 & Pillow 10+
-if not hasattr(PIL.Image, 'ANTIALIAS'):
-    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
+if not hasattr(Image, 'ANTIALIAS'):
+    Image.ANTIALIAS = Image.Resampling.LANCZOS
 
 
 
@@ -34,15 +37,17 @@ def hex_to_rgb(hex_color):
 
 # --- FONT & MUSIC MAPPING ---
 FONT_MAP = {
-    "Montserrat": "fonts/Montserrat-Bold.ttf",
-    "Playfair Display": "fonts/Roboto-Bold.ttf",
-    "Bebas Neue": "fonts/BebasNeue-Regular.ttf",
-    "Roboto": "fonts/Roboto-Bold.ttf"
+    "Roboto": "fonts/Roboto-Bold.ttf",
+    "Inter": "fonts/Inter-Bold.ttf",
+    "Cinzel": "fonts/Cinzel-Bold.ttf",
+    "Playfair": "fonts/PlayfairDisplay-Bold.ttf",
+    "Prata": "fonts/Prata-Bold.ttf",
 }
 
 MUSIC_MAP = {
-    "real_estate_upbeat": "music/upbeat.mp3",
-    "luxury_lifestyle": "music/luxury.mp3"
+    "Upbeat": "music/Upbeat.mp3",
+    "Luxury": "music/Luxury.mp3",
+    "Motivation": "music/Motivation.mp3"
 }
 
 def get_font(font_name, size, base_dir):
@@ -52,15 +57,15 @@ def get_font(font_name, size, base_dir):
         for file in os.listdir(fonts_dir):
             if file.lower().endswith('.ttf') and search_term in file.lower():
                 font_path = os.path.join(fonts_dir, file)
-                try: return PIL.ImageFont.truetype(font_path, int(size))
+                try: return ImageFont.truetype(font_path, int(size))
                 except Exception: pass
                     
     system_fonts = ["arial.ttf", "Helvetica.ttc", "tahoma.ttf", "verdana.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf"]
     for sys_font in system_fonts:
-        try: return PIL.ImageFont.truetype(sys_font, int(size))
+        try: return ImageFont.truetype(sys_font, int(size))
         except: continue
             
-    return PIL.ImageFont.load_default()
+    return ImageFont.load_default()
 
 def ease_in_out(t, duration):
     p = max(0.0, min(1.0, t / duration))
@@ -68,7 +73,7 @@ def ease_in_out(t, duration):
 
 def wrap_text_by_pixels(text, font, max_pixels):
     if not text: return []
-    draw = PIL.ImageDraw.Draw(PIL.Image.new('RGB', (1, 1)))
+    draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
     words = str(text).split()
     lines, current_line = [], []
     for word in words:
@@ -90,140 +95,145 @@ def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths
                          agent_name, brokerage, phone, mls_source, mls_number,
                          theme_color, base_dir, logo_path=None):
 
-    from PIL import Image, ImageDraw, ImageFilter
-    import os
-
+    # ---------- BASE IMAGE ----------
     img = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
+    overlay = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 120))
+    img = Image.alpha_composite(img, overlay)
     draw = ImageDraw.Draw(img)
+    white = (255, 255, 255, 255)
 
-    rgb_theme = hex_to_rgb(theme_color)
-    bg_custom = (*rgb_theme, 235)
-    pure_white, gold = (255, 255, 255, 255), (218, 165, 32, 255)
+    # ---------- SMART SCALING ----------
+    scale_ref = min(target_w, target_h)
+    max_w = int(target_w * 0.90)
 
-    f_badge = get_font(font_choice, int(target_h * 0.035), base_dir)
-    f_price = get_font(font_choice, int(target_h * 0.085), base_dir)
-    f_addr  = get_font(font_choice, int(target_h * 0.055), base_dir)
-    f_det   = get_font(font_choice, int(target_h * 0.038), base_dir)
-    f_contact = get_font(font_choice, int(target_h * 0.035), base_dir)
-    f_small = get_font(font_choice, int(target_h * 0.018), base_dir)
+    def get_fitted_font(text, font_choice, starting_size, base_dir):
+        if not text: return get_font(font_choice, starting_size, base_dir)
+        size = starting_size
+        font = get_font(font_choice, size, base_dir)
+        dummy_draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+        
+        while size > 12: 
+            bbox = dummy_draw.textbbox((0, 0), str(text), font=font)
+            if (bbox[2] - bbox[0]) <= max_w:
+                break
+            size -= 4
+            font = get_font(font_choice, size, base_dir)
+        return font
 
-    label = status_choice.upper()
-    l_bbox = draw.textbbox((0, 0), label, font=f_badge)
-    l_w, l_h = l_bbox[2]-l_bbox[0], l_bbox[3]-l_bbox[1]
-
+    # ---------- STRINGS & FONTS ----------
+    title = status_choice.title()
     price_str = f"${price}" if (show_price and price) else ""
-    if price_str and not price_str.startswith('$'):
-        price_str = f"${price_str}"
+    cta_text = f"Schedule a Showing • {phone}" if phone else ""
 
-    p_w, p_h = (0, 0)
+    title_font = get_fitted_font(title, font_choice, int(scale_ref * 0.16), base_dir)
+    price_font = get_fitted_font(price_str, font_choice, int(scale_ref * 0.12), base_dir)
+    pill_font  = get_font(font_choice, int(scale_ref * 0.045), base_dir)
+    addr_font  = get_font(font_choice, int(scale_ref * 0.05), base_dir)
+    cta_font   = get_fitted_font(cta_text, font_choice, int(scale_ref * 0.045), base_dir)
+
+    # ---------- TITLE ----------
+    bbox = draw.textbbox((0, 0), title, font=title_font)
+    t_w, t_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
+    title_pos = ((target_w - t_w)//2, int(target_h * 0.32)) 
+    draw.text(title_pos, title, font=title_font, fill=white)
+
+    # ---------- PRICE ----------
     if price_str:
-        bbox = draw.textbbox((0, 0), price_str, font=f_price)
+        bbox = draw.textbbox((0, 0), price_str, font=price_font)
         p_w, p_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
+        price_pos = ((target_w - p_w)//2, title_pos[1] + t_h + 10)
+        draw.text(price_pos, price_str, font=price_font, fill=(230,230,230,255))
 
-    addr_lines = wrap_text_by_pixels(address, f_addr, target_w * 0.85)
-    addr_widths, addr_heights = [], []
-    addr_height = 0
+    # ---------- GLASS PILL WITH ICONS ----------
+    pill_y2 = None
+    if show_details:
+        parts = []
+        if beds: parts.append(f"🛏 {beds}")
+        if baths: parts.append(f"🛁 {baths}")
+        if sqft: parts.append(f"⬜ {sqft}")
 
-    for line in addr_lines:
-        bbox = draw.textbbox((0, 0), line, font=f_addr)
-        w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]
-        addr_widths.append(w)
-        addr_heights.append(h)
-        addr_height += h + 12
+        if parts:
+            pill_text = "   ".join(parts)
+            bbox = draw.textbbox((0, 0), pill_text, font=pill_font)
+            p_w, p_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
 
-    parts = []
-    if beds: parts.append(f"{beds} Beds")
-    if baths: parts.append(f"{baths} Baths")
-    if sqft: parts.append(f"{sqft} Sq Ft")
-    details_str = " | ".join(parts) if (show_details and parts) else ""
+            pad_x, pad_y = int(scale_ref*0.04), int(scale_ref*0.02)
+            pill_w = p_w + pad_x * 2
+            pill_h = p_h + pad_y * 2
 
-    d_w, d_h = (0, 0)
-    if details_str:
-        bbox = draw.textbbox((0, 0), details_str, font=f_det)
-        d_w, d_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
+            pill_x1 = (target_w - pill_w)//2
+            pill_y1 = int(target_h * 0.55)
+            pill_y2 = pill_y1 + pill_h
 
-    contact_str = f"Schedule a Showing!\n {phone}" if phone else "Schedule a Showing!"
-    bbox = draw.textbbox((0, 0), contact_str, font=f_contact)
-    c_w, c_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
+            pill_area = img.crop((pill_x1, pill_y1, pill_x1+pill_w, pill_y2))
+            blurred = pill_area.filter(ImageFilter.GaussianBlur(18))
+            img.paste(blurred, (pill_x1, pill_y1))
 
-    box_w = min(max([p_w, max(addr_widths) if addr_widths else 0, d_w, c_w]) + 120, target_w * 0.95)
-    box_h = 50 + p_h + addr_height + d_h + c_h + 140
+            glass = Image.new('RGBA', (pill_w, pill_h), (255,255,255,60))
+            img.paste(glass, (pill_x1, pill_y1), glass)
 
-    start_x = int((target_w - box_w) / 2)
-    start_y = int((target_h - box_h) / 2) - 80
+            draw.text(((target_w - p_w)//2, pill_y1 + pad_y - 5), pill_text, font=pill_font, fill=white)
 
-    draw.rounded_rectangle(
-        [start_x, start_y, start_x+box_w, start_y+box_h],
-        radius=25,
-        fill=bg_custom,
-        outline=gold,
-        width=3
-    )
+    # ---------- CTA ----------
+    if cta_text:
+        bbox = draw.textbbox((0,0), cta_text, font=cta_font)
+        c_w, c_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
+        cta_y = pill_y2 + int(target_h * 0.05) if pill_y2 else int(target_h*0.65)
+        draw.text(((target_w - c_w)//2, cta_y), cta_text, font=cta_font, fill=(255,255,255,230))
 
-    pill_pad_x, pill_pad_y = 35, 15
-    pill_w = l_w + (pill_pad_x * 2)
-    pill_h = l_h + (pill_pad_y * 2)
-    pill_x1 = int((target_w - pill_w) / 2)
-    pill_y1 = start_y - int(pill_h / 2)
-    pill_x2 = pill_x1 + pill_w
-    pill_y2 = pill_y1 + pill_h
+    # ---------- ADDRESS (WITH WORD WRAP) ----------
+    if address:
+        address_lines = wrap_text_by_pixels(address, addr_font, max_w)
+        start_y = int(target_h * 0.80)
+        line_spacing = int(target_h * 0.01) 
+        
+        for line in address_lines:
+            bbox = draw.textbbox((0, 0), line, font=addr_font)
+            line_w = bbox[2] - bbox[0]
+            line_h = bbox[3] - bbox[1]
+            
+            x_pos = (target_w - line_w) // 2
+            draw.text((x_pos, start_y), line, font=addr_font, fill=(200, 200, 200, 255))
+            start_y += line_h + line_spacing
 
-    draw.rounded_rectangle([pill_x1, pill_y1, pill_x2, pill_y2], radius=int(pill_h/2), fill=gold)
-    draw.text(((target_w - l_w)/2, pill_y1 + pill_pad_y - 2), label, font=f_badge, fill=bg_custom)
-
-    curr_y = start_y + int(pill_h / 2) + 20
-
-    if price_str:
-        draw.text(((target_w - p_w)/2, curr_y), price_str, font=f_price, fill=gold)
-        curr_y += p_h + 20
-
-    for i, line in enumerate(addr_lines):
-        draw.text(((target_w - addr_widths[i])/2, curr_y), line, font=f_addr, fill=pure_white)
-        curr_y += addr_heights[i] + 10
-
-    if details_str:
-        curr_y += 10
-        draw.text(((target_w - d_w)/2, curr_y), details_str, font=f_det, fill=pure_white)
-        curr_y += d_h + 25
-
-    draw.text(((target_w - c_w)/2, curr_y), contact_str, font=f_contact, fill=pure_white)
-
-    footer_h = 140
-    footer_area = img.crop((0, target_h - footer_h, target_w, target_h))
-    blurred = footer_area.filter(ImageFilter.GaussianBlur(12))
-    overlay = Image.new('RGBA', (target_w, footer_h), (0, 0, 0, 120))
-    img.paste(blurred, (0, target_h - footer_h))
-    img.paste(overlay, (0, target_h - footer_h), overlay)
-
-    draw = ImageDraw.Draw(img)
-    bottom_y = target_h - footer_h + 15
-
-    if logo_path and os.path.exists(logo_path):
-        try:
-            logo = Image.open(logo_path).convert("RGBA")
-            max_w = int(target_w * 0.18)
-            ratio = max_w / logo.width
-            logo = logo.resize((max_w, int(logo.height * ratio)))
-            logo_x = int((target_w - logo.width) / 2)
-            img.paste(logo, (logo_x, bottom_y), logo)
-            bottom_y += logo.height + 8
-        except:
-            pass
-
-    if agent_name or brokerage:
-        credit = f"{agent_name} • {brokerage}" if agent_name else brokerage
-        bbox = draw.textbbox((0, 0), credit, font=f_small)
-        draw.text(((target_w - (bbox[2]-bbox[0]))/2, bottom_y), credit, font=f_small, fill=(220,220,220,255))
-        bottom_y += (bbox[3]-bbox[1]) + 5
-
-    if mls_source or mls_number:
-        mls = f"{mls_source} • MLS {mls_number}"
-        bbox = draw.textbbox((0, 0), mls, font=f_small)
-        draw.text(((target_w - (bbox[2]-bbox[0]))/2, bottom_y), mls, font=f_small, fill=(180,180,180,255))
-
+    # ---------- SAVE BASE ----------
     temp = os.path.join(base_dir, f"temp_title_{job_id}.png")
     img.save(temp)
-    return ImageClip(temp).with_duration(duration)
+
+    base_clip = ImageClip(temp).with_duration(duration)
+
+    # =========================================================
+    # 🎬 ANIMATIONS (CapCut Style)
+    # =========================================================
+    animated = base_clip.with_effects([
+        vfx.FadeIn(0.8),
+        vfx.FadeOut(0.8)
+    ]).resized(lambda t: 1 + 0.05 * (t/duration))
+
+    # =========================================================
+    # ✨ GRADIENT LIGHT SWEEP
+    # =========================================================
+    sweep = np.zeros((target_h, target_w, 4), dtype=np.uint8)
+
+    for x in range(target_w):
+        alpha = int(120 * (1 - abs((x / target_w) - 0.5) * 2))
+        sweep[:, x] = [255, 255, 255, max(0, alpha)]
+
+    sweep_img = Image.fromarray(sweep, 'RGBA')
+    sweep_path = os.path.join(base_dir, f"temp_sweep_{job_id}.png")
+    sweep_img.save(sweep_path)
+
+    sweep_clip = (
+        ImageClip(sweep_path)
+        .with_duration(duration)
+        .with_opacity(0.25)
+        .with_position(lambda t: (int(-target_w + (t/duration)*(2*target_w)), 0))
+    )
+
+    return CompositeVideoClip(
+        [animated, sweep_clip],
+        size=(target_w, target_h)
+    ).with_duration(duration)
 
 def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice, base_dir, timings=None):
     if not text: return []
@@ -232,7 +242,7 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
     text = str(text).upper().strip()
     words = text.split()
     max_text_width_px = target_w * 0.8
-    draw_t = PIL.ImageDraw.Draw(PIL.Image.new('RGBA', (1,1)))
+    draw_t = ImageDraw.Draw(Image.new('RGBA', (1,1)))
     space_w = int(draw_t.textlength(" ", font=font))
     
     lines_data, current_line_words, current_line_w, max_h_line = [], [], 0, 0
@@ -265,8 +275,8 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
             word_idx += 1
         curr_y += line_h + (target_h * 0.01)
 
-    bg_overlay = PIL.Image.new('RGBA', (target_w, target_h), (0,0,0,0))
-    draw_bg = PIL.ImageDraw.Draw(bg_overlay)
+    bg_overlay = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
+    draw_bg = ImageDraw.Draw(bg_overlay)
     draw_bg.rounded_rectangle([x1, y1, x1+bw, y1+bh], radius=15, fill=(40, 40, 40, 220), outline=(255, 255, 255, 60), width=2)
     for w_idx, word_text, x, y in word_positions:
         draw_bg.text((x, y), word_text, font=font, fill=(255, 255, 255))
@@ -285,8 +295,8 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
                 end_time = min(end_time + 0.3, duration)
                 if end_time <= start_time: continue
                 
-                hl_img = PIL.Image.new('RGBA', (target_w, target_h), (0,0,0,0))
-                draw_hl = PIL.ImageDraw.Draw(hl_img)
+                hl_img = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
+                draw_hl = ImageDraw.Draw(hl_img)
                 draw_hl.text((x, y), word_text, font=font, fill=(218, 165, 32, 255))
                 hl_temp = os.path.join(base_dir, f"temp_hl_{job_id}_{hash_id}_{w_idx}.png") 
                 hl_img.save(hl_temp)
@@ -323,8 +333,8 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
 
     def _create_text_clip(text, font, fill_color, y_pos, start_time, clip_duration, job_id, unique_name):
         if not text: return None
-        txt_img = PIL.Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
-        txt_draw = PIL.ImageDraw.Draw(txt_img)
+        txt_img = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
+        txt_draw = ImageDraw.Draw(txt_img)
         bbox = txt_draw.textbbox((0, 0), text, font=font)
         txt_draw.text(((target_w - (bbox[2]-bbox[0])) / 2, y_pos), text, font=font, fill=fill_color)
         temp_path = os.path.join(base_dir, f"temp_end_txt_{unique_name}_{job_id}.png") 
@@ -369,20 +379,43 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
 
 def generate_edge_audio(text, voice, output_path):
     timings = []
+    
     async def _amain():
         communicate = edge_tts.Communicate(text, voice)
         with open(output_path, "wb") as file:
             async for chunk in communicate.stream():
-                if chunk["type"] == "audio": file.write(chunk["data"])
+                if chunk["type"] == "audio": 
+                    file.write(chunk["data"])
                 elif chunk["type"] == "WordBoundary":
-                    start, end = chunk["offset"] / 10000000.0, (chunk["offset"] + chunk["duration"]) / 10000000.0
+                    start = chunk["offset"] / 10000000.0
+                    end = (chunk["offset"] + chunk["duration"]) / 10000000.0
                     timings.append((start, end, chunk["text"]))
-    asyncio.run(_amain())
+                    
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
+        
+    if loop and loop.is_running():
+        def run_in_thread():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            new_loop.run_until_complete(_amain())
+            new_loop.close()
+            
+        thread = threading.Thread(target=run_in_thread)
+        thread.start()
+        thread.join()
+    else:
+        asyncio.run(_amain())
+        
     return timings
 
 def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, beds, baths, sqft, lang, font_choice, show_price, show_details, voice_model, status_choice, agent_name, brokerage, phone, mls_source, mls_number, target_slide_dur, timing_mode, theme_color, logo_path, base_dir):
     dur = target_slide_dur
     vo_clip, vo_timings = None, None
+    
+    # ... existing voiceover code ...
     if scene_data.get('enable_vo') and scene_data.get('caption'):
         try:
             vo_path = os.path.join(base_dir, f"temp_vo_{job_id}_{scene_data['id']}.mp3") 
@@ -391,9 +424,20 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
             dur = max(target_slide_dur, vo_clip.duration + 0.3)
         except: pass
 
-    base = ImageClip(scene_data['image_path']).resized(height=th)
-    if base.w < tw: base = base.resized(width=tw)
-    base = base.cropped(x_center=base.w/2, y_center=base.h/2, width=tw, height=th).with_duration(dur)
+    # --- NEW: JUST-IN-TIME IMAGE RECOVERY ---
+    img_path = scene_data['image_path']
+    img_url = scene_data.get('image_url')
+    
+    # If Railway wiped the file, download it from Supabase back to local disk
+    if not os.path.exists(img_path) and img_url and img_url.startswith('http'):
+        r = requests.get(img_url)
+        if r.status_code == 200:
+            os.makedirs(os.path.dirname(img_path), exist_ok=True)
+            with open(img_path, 'wb') as f:
+                f.write(r.content)
+    # ----------------------------------------
+
+    base = ImageClip(img_path).resized(height=th)
     
     animated = base.resized(lambda t: 1.0 + 0.15 * ease_in_out(t, dur))
 
@@ -405,9 +449,19 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
     layers = [animated.with_duration(dur)]
     layers.extend(overlay_layers)
     
+    # LOGO MASKING FIX (The Green Square Destroyer)
     if logo_path and os.path.exists(logo_path):
-        logo_clip = ImageClip(logo_path).resized(width=int(tw * 0.16)).with_position((40, 40)).with_duration(dur)
-        layers.append(logo_clip)
+        logo_canvas = Image.new('RGBA', (tw, th), (0, 0, 0, 0))
+        logo_img = Image.open(logo_path).convert("RGBA")
+        
+        logo_w = int(tw * 0.16)
+        logo_img.thumbnail((logo_w, logo_w), Image.Resampling.LANCZOS)
+        
+        logo_canvas.paste(logo_img, (40, 40), mask=logo_img)
+        
+        logo_temp = os.path.join(base_dir, f"temp_logo_overlay_{job_id}_{i}.png")
+        logo_canvas.save(logo_temp)
+        layers.append(ImageClip(logo_temp).with_duration(dur))
 
     final_clip = CompositeVideoClip(layers, size=(tw, th)).with_duration(dur)
     if vo_clip: final_clip = final_clip.with_audio(vo_clip)
@@ -425,7 +479,7 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
         if req_dict.get('logo_data') and ',' in req_dict.get('logo_data'):
             logo_data = base64.b64decode(req_dict.get('logo_data').split(',', 1)[1])
             logo_file_path = os.path.join(base_dir, f"temp_logo_{job_id}.png")
-            PIL.Image.open(io.BytesIO(logo_data)).save(logo_file_path)
+            Image.open(io.BytesIO(logo_data)).save(logo_file_path)
 
         # Optimization: Use 720p for faster rendering
         tw, th = (720, 1280) if "Vertical" in req_dict.get('format', 'Vertical') else (1280, 720)
@@ -447,7 +501,6 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
         )
         clips.append(end_screen)
 
-        # REVERT: Concatenate in one stream (No Chunking)
         final = concatenate_videoclips(clips)
 
         music_choice = req_dict.get('music')
@@ -457,10 +510,8 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
                 bg_music = AudioFileClip(music_file)
                 
                 if bg_music.duration < final.duration:
-                    # Loop the audio if it's too short
                     bg_music = concatenate_audioclips([bg_music] * (int(final.duration / bg_music.duration) + 1))
                 
-                # MoviePy 2.x syntax for adjusting duration and volume
                 bg_music = bg_music.with_duration(final.duration).with_volume_scaled(0.08)
                 
                 if final.audio: 
@@ -468,7 +519,6 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
                 else: 
                     final.audio = bg_music
 
-        # SPEED OPTIMIZATION: threads=4 and ultrafast preset
         final.write_videofile(
             output_path, fps=24, codec="libx264", audio_codec="aac", 
             threads=4, preset="ultrafast", logger=None, ffmpeg_params=["-movflags", "faststart"]

@@ -83,15 +83,35 @@ def background_render_task(job_id: str, req: RenderRequest):
         jobs[job_id]["status"] = "rendering"
         output_filename = f"listing_{job_id}.mp4"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
+
         success = render_cinematic_video(job_id, req, output_path, BASE_DIR)
+
         if success:
+            final_video_url = f"{get_base_url()}/outputs/{output_filename}"
+            
+            # --- NEW: UPLOAD FINAL VIDEO TO SUPABASE ---
+            if supabase:
+                try:
+                    with open(output_path, "rb") as f:
+                        vid_bytes = f.read()
+                    supabase.storage.from_("listings").upload(
+                        path=output_filename,
+                        file=vid_bytes,
+                        file_options={"content-type": "video/mp4"}
+                    )
+                    final_video_url = supabase.storage.from_("listings").get_public_url(output_filename)
+                except Exception as e:
+                    print(f"Supabase video upload failed: {e}")
+            # -------------------------------------------
+
             jobs[job_id]["status"] = "completed"
-            jobs[job_id]["video_url"] = f"{get_base_url()}/outputs/{output_filename}"
+            jobs[job_id]["progress"] = 100
+            jobs[job_id]["video_url"] = final_video_url # Safe, permanent URL
+
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)
-        # Handle refunding a credit here if needed!
-
+        
 @app.post("/api/fetch-zillow")
 async def fetch_zillow(req: FetchRequest):
     # Same as before
@@ -100,7 +120,41 @@ async def fetch_zillow(req: FetchRequest):
         fb_draft = generate_fb_post_content(meta_data, req.language)
         base_url = get_base_url()
         scenes = []
+
         for img_path in downloaded_images:
+            analysis = analyze_image_with_gemini(img_path, req.language, meta_data.get('description', ''))
+            filename = os.path.basename(img_path)
+            
+            # Fallback URL
+            public_url = f"{base_url}/raw_photos/{filename}"
+            
+            # --- NEW: UPLOAD PHOTO TO SUPABASE ---
+            if supabase:
+                try:
+                    with open(img_path, "rb") as f:
+                        file_bytes = f.read()
+                    # Upload to the 'listings' bucket
+                    supabase.storage.from_("listings").upload(
+                        path=filename,
+                        file=file_bytes,
+                        file_options={"content-type": "image/jpeg"}
+                    )
+                    # Get the permanent public URL
+                    public_url = supabase.storage.from_("listings").get_public_url(filename)
+                except Exception as e:
+                    print(f"Supabase photo upload failed: {e}")
+            # -------------------------------------
+
+            scenes.append({
+                "id": str(uuid.uuid4()),
+                "image_path": img_path, 
+                "image_url": public_url, # Frontend now uses permanent Supabase URL!
+                "room_type": analysis.get("room_type", "Room"),
+                "caption": analysis.get("caption", "Beautiful Home"),
+                "effect": analysis.get("effect", "zoom_in"),
+                "enable_vo": True
+            })
+
             analysis = analyze_image_with_gemini(img_path, req.language, meta_data.get('description', ''))
             scenes.append({
                 "id": str(uuid.uuid4()), "image_path": img_path, 
