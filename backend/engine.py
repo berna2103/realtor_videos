@@ -23,58 +23,21 @@ from moviepy import (
     afx
 )
 
-# Define fixed icons for the pill (as requested in the visual look)
-ICON_MAP = {
-    'bed': "🛏", # These Unicode icons are placeholders.
-    'bath': "🛁",
-    'sqft': "📏"
-}
-
-# Define outline icons as point-draw data. 
-# Coordinate values are internal to a unit box and will be scaled.
-# Coordinate format: (x, y)
-# Define outline icons as lists of paths (to allow pen lifts)
-BED_PATHS = [
-    [(0.1, 0.2), (0.1, 0.8)], # left headboard
-    [(0.1, 0.6), (0.9, 0.6), (0.9, 0.8)], # bed frame
-    [(0.2, 0.6), (0.2, 0.4), (0.5, 0.4), (0.5, 0.6)] # pillow
-]
-BATH_PATHS = [
-    [(0.1, 0.5), (0.1, 0.8), (0.9, 0.8), (0.9, 0.5), (0.1, 0.5)], # tub
-    [(0.2, 0.8), (0.2, 0.9)], # left leg
-    [(0.8, 0.8), (0.8, 0.9)], # right leg
-    [(0.8, 0.5), (0.8, 0.1), (0.6, 0.1), (0.6, 0.2)] # showerhead
-]
-SQFT_PATHS = [
-    [(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8), (0.2, 0.2)] # square box
-]
-
-
 # Fix for MoviePy 1.0.3 & Pillow 10+
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
+# --- ICONS & PATHS ---
+BED_PATHS = [[(0.1, 0.2), (0.1, 0.8)], [(0.1, 0.6), (0.9, 0.6), (0.9, 0.8)], [(0.2, 0.6), (0.2, 0.4), (0.5, 0.4), (0.5, 0.6)]]
+BATH_PATHS = [[(0.1, 0.5), (0.1, 0.8), (0.9, 0.8), (0.9, 0.5), (0.1, 0.5)], [(0.2, 0.8), (0.2, 0.9)], [(0.8, 0.8), (0.8, 0.9)], [(0.8, 0.5), (0.8, 0.1), (0.6, 0.1), (0.6, 0.2)]]
+SQFT_PATHS = [[(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8), (0.2, 0.2)]]
 
+MUSIC_MAP = {"Upbeat": "music/Upbeat.mp3", "Luxury": "music/Luxury.mp3", "Motivation": "music/Motivation.mp3"}
 
 # --- HELPER FUNCTIONS ---
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-
-# --- FONT & MUSIC MAPPING ---
-FONT_MAP = {
-    "Roboto": "fonts/Roboto-Bold.ttf",
-    "Inter": "fonts/Inter-Bold.ttf",
-    "Cinzel": "fonts/Cinzel-Bold.ttf",
-    "Playfair": "fonts/PlayfairDisplay-Bold.ttf",
-    "Prata": "fonts/Prata-Bold.ttf",
-}
-
-MUSIC_MAP = {
-    "Upbeat": "music/Upbeat.mp3",
-    "Luxury": "music/Luxury.mp3",
-    "Motivation": "music/Motivation.mp3"
-}
 
 def get_font(font_name, size, base_dir):
     fonts_dir = os.path.join(base_dir, 'fonts')
@@ -85,159 +48,111 @@ def get_font(font_name, size, base_dir):
                 font_path = os.path.join(fonts_dir, file)
                 try: return ImageFont.truetype(font_path, int(size))
                 except Exception: pass
-                    
-    system_fonts = ["arial.ttf", "Helvetica.ttc", "tahoma.ttf", "verdana.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf"]
-    for sys_font in system_fonts:
-        try: return ImageFont.truetype(sys_font, int(size))
-        except: continue
-            
     return ImageFont.load_default()
 
 def ease_in_out(t, duration):
     p = max(0.0, min(1.0, t / duration))
     return p * p * (3 - 2 * p)
 
-def wrap_text_by_pixels(text, font, max_pixels):
-    if not text: return []
-    draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
-    words = str(text).split()
-    lines, current_line = [], []
-    for word in words:
-        test_line = ' '.join(current_line + [word]) if current_line else word
-        bbox = draw.textbbox((0, 0), test_line, font=font)
-        if (bbox[2] - bbox[0]) <= max_pixels: current_line.append(word)
-        else:
-            if current_line:
-                lines.append(' '.join(current_line))
-                current_line = [word]
-            else:
-                lines.append(word)
-                current_line = []
-    if current_line: lines.append(' '.join(current_line))
-    return lines
+def draw_text_with_shadow(draw, pos, text, font, fill_color, shadow_color=(0, 0, 0, 200), offset=2):
+    """Helper to draw text with a subtle drop shadow for maximum legibility."""
+    x, y = pos
+    draw.text((x + offset, y + offset), text, font=font, fill=shadow_color)
+    draw.text((x, y), text, font=font, fill=fill_color)
+
+def create_gradient_scrim(width, height, max_alpha=180):
+    """
+    Creates a full-screen subtle dark overlay with a slight bottom emphasis.
+    Keeps image visible while improving white text readability.
+    """
+    mask = Image.new('L', (1, height), color=0)
+    for y in range(height):
+        base_alpha = max_alpha * 0.5
+        gradient_alpha = max_alpha * ((y / height) ** 1.5)
+        alpha = int(min(base_alpha + gradient_alpha, max_alpha))
+        mask.putpixel((0, y), alpha)
+    mask = mask.resize((width, height))
+    scrim = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    black = Image.new('RGBA', (width, height), (0, 0, 0, 255))
+    scrim.paste(black, (0, 0), mask=mask)
+    return scrim
 
 def draw_unit_icon(draw, paths, center_x, center_y, scale_factor, color):
-    """Draws a unit outline icon from a list of paths."""
     for path in paths:
         scaled_points = [(p[0] * scale_factor + center_x - (scale_factor/2), 
                           p[1] * scale_factor + center_y - (scale_factor/2)) for p in path]
         draw.line(scaled_points, fill=color, width=2)
 
 def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir):
-    if not show_details and not show_price:
-        return []
-
-    # Text Colors from image reference
-    color_white = (255, 255, 255, 255)
-    color_light_gray = (210, 210, 210, 255) 
-    color_pill_fill = (25, 25, 25, 140) 
-    color_pill_outline = (255, 255, 255, 40) 
+    if not show_details and not show_price: return []
+    color_white, color_light_gray = (255, 255, 255, 255), (210, 210, 210, 255)
+    color_pill_fill, color_pill_outline = (25, 25, 25, 140), (255, 255, 255, 40)
 
     overlay_img = Image.new('RGBA', (tw, th), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay_img)
+    scrim = create_gradient_scrim(tw, th)
+    overlay_img.paste(scrim, (0, 0), mask=scrim)
     
-    # Use the dynamic get_font helper to load the user's chosen font style
-    f_status = get_font(font_choice, int(th * 0.080), base_dir) # MASSIVE title
-    f_price = get_font(font_choice, int(th * 0.050), base_dir)  # Large price
-    f_pill = get_font(font_choice, int(th * 0.022), base_dir)   # Small pill text
-    f_addr = get_font(font_choice, int(th * 0.024), base_dir)   # Medium address
-    f_agent = get_font(font_choice, int(th * 0.018), base_dir)  # Agent contact
-    f_cta = get_font(font_choice, int(th * 0.024), base_dir)    # CTA
+    draw = ImageDraw.Draw(overlay_img)
+    f_status = get_font(font_choice, int(th * 0.080), base_dir)
+    f_price = get_font(font_choice, int(th * 0.050), base_dir)
+    f_pill = get_font(font_choice, int(th * 0.022), base_dir)
+    f_addr = get_font(font_choice, int(th * 0.024), base_dir)
+    f_agent = get_font(font_choice, int(th * 0.018), base_dir)
+    f_cta = get_font(font_choice, int(th * 0.024), base_dir)
 
-    # --- ABSOLUTE Y-POSITIONING (Creates the cinematic gap) ---
-    y_status = int(th * 0.20)
-    y_price = int(th * 0.32)
-    y_pill = int(th * 0.62)
-    y_addr = int(th * 0.74)
-    y_agent = int(th * 0.85)
-    y_cta = int(th * 0.91)
+    y_status, y_price, y_pill, y_addr, y_agent, y_cta = int(th * 0.20), int(th * 0.32), int(th * 0.62), int(th * 0.74), int(th * 0.85), int(th * 0.91)
 
-    # --- 1. Large Status Text ---
     if status:
-        status_txt = status.strip()
-        bbox = draw.textbbox((0, 0), status_txt, font=f_status)
-        draw.text(((tw - (bbox[2] - bbox[0])) // 2, y_status), status_txt, font=f_status, fill=color_white)
+        bbox = draw.textbbox((0, 0), status.strip(), font=f_status)
+        x_pos = (tw - (bbox[2] - bbox[0])) // 2
+        draw_text_with_shadow(draw, (x_pos, y_status), status.strip(), f_status, color_white)
 
-    # --- 2. Medium Price Text ---
     if show_price and price:
-        clean_price = str(price).replace('$', '').replace(',', '').strip()
-        try:
-            p_str = f"${int(float(clean_price)):,}"
-        except ValueError:
-            p_str = str(price)
-
+        p_str = f"${int(float(str(price).replace('$', '').replace(',', ''))):,}"
         bbox = draw.textbbox((0, 0), p_str, font=f_price)
-        draw.text(((tw - (bbox[2] - bbox[0])) // 2, y_price), p_str, font=f_price, fill=color_white)
+        x_pos = (tw - (bbox[2] - bbox[0])) // 2
+        draw_text_with_shadow(draw, (x_pos, y_price), p_str, f_price, color_white)
 
-    # --- 3. The Details Pill (Spaced, no dots) ---
     if show_details:
         details = []
         if beds: details.append(('bed', str(beds) + " beds"))
         if baths: details.append(('bath', str(baths) + " baths"))
         if sqft: details.append(('sqft', str(sqft) + " Sqft."))
-
         if details:
-            pill_h = int(th * 0.06)
-            icon_draw_scale = int(pill_h * 0.4)
-            gap_icon_text = int(tw * 0.015) # Gap between icon and text
-            gap_items = int(tw * 0.04)      # Gap between beds/baths/sqft blocks
-            
-            blocks_data = []
-            total_content_width = 0
-
-            # Calculate total width
+            pill_h, icon_draw_scale = int(th * 0.06), int(th * 0.06 * 0.4)
+            gap_icon_text, gap_items, ext_padding = int(tw * 0.015), int(tw * 0.04), int(tw * 0.06)
+            blocks_data, total_content_width = [], 0
             for icon_type, txt_val in details:
-                txt_bbox = draw.textbbox((0, 0), txt_val, font=f_pill)
-                txt_w = txt_bbox[2] - txt_bbox[0]
+                txt_w = draw.textbbox((0, 0), txt_val, font=f_pill)[2]
                 block_w = icon_draw_scale + gap_icon_text + txt_w
                 blocks_data.append((icon_type, txt_val, block_w))
                 total_content_width += block_w
-
-            total_content_width += (len(details) - 1) * gap_items
-            ext_padding = int(tw * 0.06) # Padding inside the ends of the pill
-            pill_w = total_content_width + (ext_padding * 2)
-
+            pill_w = total_content_width + (len(details) - 1) * gap_items + (ext_padding * 2)
             px, py = (tw - pill_w) // 2, y_pill
-            
-            # Draw pill background
             draw.rounded_rectangle([px, py, px + pill_w, py + pill_h], radius=pill_h // 2, fill=color_pill_fill, outline=color_pill_outline, width=2)
-
-            curr_x = px + ext_padding
-            icon_center_y = py + (pill_h // 2)
-
-            # Draw Icons and Text
-            for i, (icon_type, txt_val, block_w) in enumerate(blocks_data):
-                icon_paths = None
-                if icon_type == 'bed': icon_paths = BED_PATHS
-                elif icon_type == 'bath': icon_paths = BATH_PATHS
-                elif icon_type == 'sqft': icon_paths = SQFT_PATHS
-                
-                draw_unit_icon(draw, icon_paths, curr_x + (icon_draw_scale // 2), icon_center_y, icon_draw_scale, color_light_gray)
+            curr_x, icon_center_y = px + ext_padding, py + (pill_h // 2)
+            for icon_type, txt_val, block_w in blocks_data:
+                paths = BED_PATHS if icon_type == 'bed' else BATH_PATHS if icon_type == 'bath' else SQFT_PATHS
+                draw_unit_icon(draw, paths, curr_x + (icon_draw_scale // 2), icon_center_y, icon_draw_scale, color_light_gray)
                 curr_x += icon_draw_scale + gap_icon_text
-
-                # Vertically center text in pill
                 txt_bbox = draw.textbbox((0, 0), txt_val, font=f_pill)
-                txt_h = txt_bbox[3] - txt_bbox[1]
-                text_y = py + (pill_h - txt_h) // 2 - int(th * 0.005) 
-                
-                draw.text((curr_x, text_y), txt_val, font=f_pill, fill=color_light_gray)
+                draw.text((curr_x, py + (pill_h - (txt_bbox[3] - txt_bbox[1])) // 2 - int(th * 0.005)), txt_val, font=f_pill, fill=color_light_gray)
                 curr_x += (block_w - icon_draw_scale - gap_icon_text) + gap_items
 
-    # --- 4. Main Address Line (Preserve Casing) ---
     if addr:
-        # We no longer split it, we use the whole address string just like the image
         bbox = draw.textbbox((0, 0), addr, font=f_addr)
-        draw.text(((tw - (bbox[2] - bbox[0])) // 2, y_addr), addr, font=f_addr, fill=color_light_gray)
+        x_pos = (tw - (bbox[2] - bbox[0])) // 2
+        draw_text_with_shadow(draw, (x_pos, y_addr), addr, f_addr, color_light_gray)
 
-    # --- 5. Agent Number & CTA ---
     if phone:
-        agent_txt = f"Agent Contact: {phone}"
-        bbox = draw.textbbox((0, 0), agent_txt, font=f_agent)
-        draw.text(((tw - (bbox[2] - bbox[0])) // 2, y_agent), agent_txt, font=f_agent, fill=color_white)
+        txt = f"Agent Contact: {phone}"
+        bbox = draw.textbbox((0, 0), txt, font=f_agent)
+        x_pos = (tw - (bbox[2] - bbox[0])) // 2
+        draw_text_with_shadow(draw, (x_pos, y_agent), txt, f_agent, color_white)
 
-    cta_txt = "SCHEDULE SHOWING!"
-    bbox = draw.textbbox((0, 0), cta_txt, font=f_cta)
-    draw.text(((tw - (bbox[2] - bbox[0])) // 2, y_cta), cta_txt, font=f_cta, fill=color_white)
+    bbox = draw.textbbox((0, 0), "SCHEDULE SHOWING!", font=f_cta)
+    x_pos = (tw - (bbox[2] - bbox[0])) // 2
+    draw_text_with_shadow(draw, (x_pos, y_cta), "SCHEDULE SHOWING!", f_cta, color_white)
 
     temp = os.path.join(base_dir, f"temp_title_{job_id}.png")
     overlay_img.save(temp)
@@ -245,15 +160,10 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
 
 def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice, base_dir, timings=None, theme_color="#552448"):
     if not text: return []
-    
-    # Convert hex theme color to RGB for the highlight
     rgb_highlight = hex_to_rgb(theme_color) + (255,)
-    
-    base_font_size = int(target_h * 0.027)
-    font = get_font(font_choice, base_font_size, base_dir)
+    font = get_font(font_choice, int(target_h * 0.027), base_dir)
     text = str(text).upper().strip()
     words = text.split()
-    max_text_width_px = target_w * 0.8
     draw_t = ImageDraw.Draw(Image.new('RGBA', (1,1)))
     space_w = int(draw_t.textlength(" ", font=font))
     
@@ -261,308 +171,215 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
     for word in words:
         bbox = draw_t.textbbox((0,0), word, font=font)
         w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]
-        if current_line_words and (current_line_w + space_w + w) > max_text_width_px:
+        if current_line_words and (current_line_w + space_w + w) > (target_w * 0.8):
             lines_data.append((current_line_w, max_h_line, current_line_words))
             current_line_words, current_line_w, max_h_line = [(word, w, h)], w, h
         else:
-            if current_line_words: current_line_w += space_w + w
-            else: current_line_w = w
+            current_line_w += (space_w if current_line_words else 0) + w
             max_h_line = max(max_h_line, h)
             current_line_words.append((word, w, h))
     if current_line_words: lines_data.append((current_line_w, max_h_line, current_line_words))
 
-    max_w = max([ld[0] for ld in lines_data]) if lines_data else 0
-    total_h = sum([ld[1] for ld in lines_data]) + (max(0, len(lines_data) - 1)) * (target_h * 0.01)
-    
-    padding = int(target_w * 0.05)
-    bw, bh = int(max_w + padding), int(total_h + padding)
+    bw, bh = int(max([ld[0] for ld in lines_data]) + (target_w * 0.05)), int(sum([ld[1] for ld in lines_data]) + (len(lines_data) * target_h * 0.01) + (target_w * 0.05))
     x1, y1 = (target_w - bw) // 2, int(target_h * 0.85)
     
-    word_positions, curr_y, word_idx = [], y1 + (padding // 2), 0
+    bg_overlay = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
+    draw_bg = ImageDraw.Draw(bg_overlay)
+    draw_bg.rounded_rectangle([x1, y1, x1+bw, y1+bh], radius=15, fill=(40, 40, 40, 220), outline=(255, 255, 255, 60), width=2)
+    
+    word_positions, curr_y, word_idx = [], y1 + (target_w * 0.025), 0
     for line_w, line_h, words_in_line in lines_data:
         curr_x = (target_w - line_w) // 2
         for word_text, w, h in words_in_line:
             word_positions.append((word_idx, word_text, curr_x, curr_y))
+            draw_bg.text((curr_x, curr_y), word_text, font=font, fill=(255, 255, 255))
             curr_x += w + space_w
             word_idx += 1
         curr_y += line_h + (target_h * 0.01)
 
-    bg_overlay = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
-    draw_bg = ImageDraw.Draw(bg_overlay)
-    draw_bg.rounded_rectangle([x1, y1, x1+bw, y1+bh], radius=15, fill=(40, 40, 40, 220), outline=(255, 255, 255, 60), width=2)
-    for w_idx, word_text, x, y in word_positions:
-        draw_bg.text((x, y), word_text, font=font, fill=(255, 255, 255))
-        
     hash_id = hashlib.md5(text.encode()).hexdigest()[:8]
     base_temp = os.path.join(base_dir, f"temp_cap_base_{job_id}_{hash_id}.png") 
     bg_overlay.save(base_temp)
-    
     layers = [ImageClip(base_temp).with_duration(duration)]
     
     if timings:
         for w_idx, word_text, x, y in word_positions:
             if w_idx < len(timings):
-                start_time, end_time, _ = timings[w_idx]
-                if start_time >= duration: continue
-                # Add a small buffer to end_time for smoother visual transitions
-                display_end = min(end_time + 0.1, duration)
-                
+                s, e, _ = timings[w_idx]
+                if s >= duration: continue
                 hl_img = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
-                draw_hl = ImageDraw.Draw(hl_img)
-                # Apply the Brand Kit color here
-                draw_hl.text((x, y), word_text, font=font, fill=rgb_highlight)
+                ImageDraw.Draw(hl_img).text((x, y), word_text, font=font, fill=rgb_highlight)
                 hl_temp = os.path.join(base_dir, f"temp_hl_{job_id}_{hash_id}_{w_idx}.png") 
                 hl_img.save(hl_temp)
-                layers.append(ImageClip(hl_temp).with_start(start_time).with_duration(display_end - start_time))
-                
+                layers.append(ImageClip(hl_temp).with_start(s).with_duration(min(e + 0.1, duration) - s))
     return layers
 
 def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, website, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir):
-    from PIL import Image, ImageDraw, ImageOps
     rgb_theme = hex_to_rgb(theme_color)
-    
-    bg_color = (10, 10, 12)
-    img_bg = Image.new('RGB', (target_w, target_h), bg_color) 
-    draw_bg = ImageDraw.Draw(img_bg)
-    draw_bg.rectangle([0, 0, target_w, 6], fill=rgb_theme)
-    
+    img_bg = Image.new('RGB', (target_w, target_h), (10, 10, 12)) 
+    ImageDraw.Draw(img_bg).rectangle([0, 0, target_w, 6], fill=rgb_theme)
     temp_bg = os.path.join(base_dir, f"temp_end_bg_{job_id}.png") 
     img_bg.save(temp_bg)
-    base_clip = ImageClip(temp_bg).with_duration(duration)
-
-    f_cta = get_font(font_choice, int(target_h * 0.045), base_dir)
-    f_phone = get_font(font_choice, int(target_h * 0.065), base_dir)
-    f_website = get_font(font_choice, int(target_h * 0.035), base_dir)
-    f_name = get_font(font_choice, int(target_h * 0.030), base_dir)
-    f_broker = get_font(font_choice, int(target_h * 0.022), base_dir)
-    f_mls = get_font(font_choice, int(target_h * 0.016), base_dir)
     
-    cta_text = "¡AGENDA TU CITA!" if language == "Spanish" else "SCHEDULE A SHOWING!"
-    phone_text = phone if phone else ""
-    website_text = website if website else ""
-    agent_text = agent_name.upper() if agent_name else ""
-    broker_text = brokerage if brokerage else ""
-    mls_text = f"Source: {mls_source} | MLS# {mls_number}" if (mls_source or mls_number) else ""
-
-    def _create_text_clip(text, font, fill_color, y_pos, start_time, clip_duration, job_id, unique_name):
+    def _text_clip(text, base_size, color, y, start, job_id, name):
         if not text: return None
+        size = base_size
+        font = get_font(font_choice, size, base_dir)
         txt_img = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
-        txt_draw = ImageDraw.Draw(txt_img)
-        bbox = txt_draw.textbbox((0, 0), text, font=font)
-        txt_draw.text(((target_w - (bbox[2]-bbox[0])) / 2, y_pos), text, font=font, fill=fill_color)
-        temp_path = os.path.join(base_dir, f"temp_end_txt_{unique_name}_{job_id}.png") 
-        txt_img.save(temp_path)
-        return (ImageClip(temp_path)
-                .with_start(start_time)
-                .with_duration(max(0.1, clip_duration - start_time)))
+        draw = ImageDraw.Draw(txt_img)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        
+        # Dynamic Scaling: Shrink font if text is wider than 90% of screen
+        max_width = target_w * 0.90
+        while (bbox[2] - bbox[0]) > max_width and size > 12:
+            size -= 2
+            font = get_font(font_choice, size, base_dir)
+            bbox = draw.textbbox((0, 0), text, font=font)
 
-    curr_y = int(target_h * 0.30)
-    fade_start = 0.5  
-    fade_step = 0.6   
-    layers = [base_clip]
+        draw.text(((target_w - (bbox[2]-bbox[0])) / 2, y), text, font=font, fill=color)
+        path = os.path.join(base_dir, f"temp_end_txt_{name}_{job_id}.png") 
+        txt_img.save(path)
+        return ImageClip(path).with_start(start).with_duration(max(0.1, duration - start))
 
-    cta_clip = _create_text_clip(cta_text, f_cta, (160, 160, 170), curr_y, fade_start, duration, job_id, "cta")
-    if cta_clip: layers.append(cta_clip)
-    curr_y += 80
-    fade_start += fade_step
-
-    phone_clip = _create_text_clip(phone_text, f_phone, (255, 255, 255), curr_y, fade_start, duration, job_id, "phone")
-    if phone_clip: layers.append(phone_clip)
-    curr_y += 70
-    fade_start += fade_step
+    layers, curr_y, fade = [ImageClip(temp_bg).with_duration(duration)], int(target_h * 0.25), 0.5
+    courtesy_text = "Cortesía de:" if language == "Spanish" else "Listing Courtesy of:"
     
-    website_clip = _create_text_clip(website_text, f_website, (200, 200, 255), curr_y, fade_start, duration, job_id, "website")
-    if website_clip: layers.append(website_clip)
-    curr_y += 70
-    fade_start += fade_step
-
-    agent_clip = _create_text_clip(agent_text, f_name, (255, 255, 255), curr_y, fade_start, duration, job_id, "agent")
-    if agent_clip: layers.append(agent_clip)
-    curr_y += 50
-    fade_start += fade_step
-
-    broker_clip = _create_text_clip(broker_text, f_broker, (140, 140, 150), curr_y, fade_start, duration, job_id, "broker")
-    if broker_clip: layers.append(broker_clip)
+    # Store base font sizes instead of pre-rendered fonts
+    elements_to_draw = [
+        ("¡AGENDA TU CITA!" if language == "Spanish" else "SCHEDULE A SHOWING!", int(target_h * 0.045), (160, 160, 170), "cta"), 
+        (phone, int(target_h * 0.065), (255, 255, 255), "ph"), 
+        (website, int(target_h * 0.035), (200, 200, 255), "web"), 
+        (courtesy_text, int(target_h * 0.020), (180, 180, 190), "courtesy"), 
+        (agent_name.upper(), int(target_h * 0.030), (255, 255, 255), "ag"), 
+        (brokerage, int(target_h * 0.022), (140, 140, 150), "br")
+    ]
     
-    mls_clip = _create_text_clip(mls_text, f_mls, (80, 80, 90), target_h - 60, fade_start, duration, job_id, "mls")
+    for t, base_sz, c, n in elements_to_draw:
+        clip = _text_clip(t, base_sz, c, curr_y, fade, job_id, n)
+        if clip: layers.append(clip)
+        
+        if n == "cta": curr_y += 80
+        elif n in ["ph", "web"]: curr_y += 70
+        elif n == "courtesy": curr_y += 30
+        else: curr_y += 50
+        fade += 0.6
+    
+    mls_txt = f"Source: {mls_source} | MLS# {mls_number}" if (mls_source or mls_number) else ""
+    mls_clip = _text_clip(mls_txt, int(target_h * 0.016), (80, 80, 90), target_h - 60, 2.5, job_id, "mls")
     if mls_clip: layers.append(mls_clip)
-
-    final_end_screen = CompositeVideoClip(layers, size=(target_w, target_h))
-    return final_end_screen.with_duration(duration)
-
-def generate_edge_audio(text, voice, output_path):
-    timings = []
     
-    async def _amain():
-        communicate = edge_tts.Communicate(text, voice)
-        with open(output_path, "wb") as file:
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio": 
-                    file.write(chunk["data"])
-                elif chunk["type"] == "WordBoundary":
-                    start = chunk["offset"] / 10000000.0
-                    end = (chunk["offset"] + chunk["duration"]) / 10000000.0
-                    timings.append((start, end, chunk["text"]))
-                    
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = None
-        
-    if loop and loop.is_running():
-        def run_in_thread():
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            new_loop.run_until_complete(_amain())
-            new_loop.close()
-            
-        thread = threading.Thread(target=run_in_thread)
-        thread.start()
-        thread.join()
-    else:
-        asyncio.run(_amain())
-        
+    return CompositeVideoClip(layers, size=(target_w, target_h)).with_duration(duration)
+
+async def generate_edge_audio_async(text, voice, output_path):
+    timings = []
+    communicate = edge_tts.Communicate(text, voice)
+    with open(output_path, "wb") as file:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio": file.write(chunk["data"])
+            elif chunk["type"] == "WordBoundary":
+                timings.append((chunk["offset"]/10000000.0, (chunk["offset"]+chunk["duration"])/10000000.0, chunk["text"]))
     return timings
 
-def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, beds, baths, sqft, lang, font_choice, show_price, show_details, voice_model, status_choice, agent_name, brokerage, phone, mls_source, mls_number, target_slide_dur, timing_mode, theme_color, logo_path, base_dir):
+def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, beds, baths, sqft, lang, font_choice, show_price, show_details, voice_model, status_choice, agent_name, brokerage, phone, mls_source, mls_number, target_slide_dur, timing_mode, theme_color, logo_path, base_dir, vo_data=None):
     dur = target_slide_dur
     vo_clip, vo_timings = None, None
     
-    if scene_data.get('enable_vo') and scene_data.get('caption'):
+    if vo_data:
         try:
-            vo_path = os.path.join(base_dir, f"temp_vo_{job_id}_{scene_data['id']}.mp3") 
-            vo_timings = generate_edge_audio(scene_data['caption'], voice_model, vo_path)
-            vo_clip = AudioFileClip(vo_path)
+            vo_clip = AudioFileClip(vo_data["path"])
+            vo_timings = vo_data["timings"]
             dur = max(target_slide_dur, vo_clip.duration + 0.3)
         except: pass
 
     img_path = scene_data['image_path']
-    img_url = scene_data.get('image_url')
-    
-    if not os.path.exists(img_path) and img_url and img_url.startswith('http'):
-        r = requests.get(img_url)
+    if not os.path.exists(img_path) and scene_data.get('image_url', '').startswith('http'):
+        r = requests.get(scene_data['image_url'])
         if r.status_code == 200:
             os.makedirs(os.path.dirname(img_path), exist_ok=True)
-            with open(img_path, 'wb') as f:
-                f.write(r.content)
+            with open(img_path, 'wb') as f: f.write(r.content)
 
     clip = ImageClip(img_path)
-    w, h = clip.size
-    target_ratio = tw / th
-    current_ratio = w / h
-
-    if current_ratio > target_ratio:
+    tr, cr = tw / th, clip.w / clip.h
+    if cr > tr:
         clip = clip.resized(height=th)
-        x_center = clip.w / 2
-        clip = clip.cropped(x1=x_center - tw/2, y1=0, x2=x_center + tw/2, y2=th)
+        clip = clip.cropped(x1=clip.w/2 - tw/2, y1=0, x2=clip.w/2 + tw/2, y2=th)
     else:
         clip = clip.resized(width=tw)
-        y_center = clip.h / 2
-        clip = clip.cropped(x1=0, y1=y_center - th/2, x2=tw, y2=y_center + th/2)
+        clip = clip.cropped(x1=0, y1=clip.h/2 - th/2, x2=tw, y2=clip.h/2 + th/2)
     
-    base = clip
-
-    animated = base.resized(lambda t: 1.0 + 0.15 * ease_in_out(t, dur))
-
-    if is_first: 
-        # BUG 1 FIXED HERE: Removed the extra [ ] brackets
-        overlay_layers = create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status_choice, agent_name, brokerage, phone, mls_source, mls_number, theme_color, base_dir)
-    else: 
-        overlay_layers = create_glass_caption(
-            job_id, 
-            scene_data['caption'], 
-            dur, 
-            tw, 
-            th, 
-            font_choice, 
-            base_dir, 
-            vo_timings,
-            theme_color=theme_color 
-        )
+    layers = [clip.resized(lambda t: 1.0 + 0.15 * ease_in_out(t, dur)).with_duration(dur)]
+    if is_first:
+        layers.extend(create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status_choice, agent_name, brokerage, phone, mls_source, mls_number, theme_color, base_dir))
+    else:
+        layers.extend(create_glass_caption(job_id, scene_data['caption'], dur, tw, th, font_choice, base_dir, vo_timings, theme_color))
         
-    layers = [animated.with_duration(dur)]
-    layers.extend(overlay_layers)
-    
     if logo_path and os.path.exists(logo_path):
         logo_canvas = Image.new('RGBA', (tw, th), (0, 0, 0, 0))
         logo_img = Image.open(logo_path).convert("RGBA")
-        logo_w = int(tw * 0.16)
-        logo_img.thumbnail((logo_w, logo_w), Image.Resampling.LANCZOS)
+        lw = int(tw * 0.16)
+        logo_img.thumbnail((lw, lw), Image.Resampling.LANCZOS)
         logo_canvas.paste(logo_img, (40, 40), mask=logo_img)
-        logo_temp = os.path.join(base_dir, f"temp_logo_overlay_{job_id}_{i}.png")
-        logo_canvas.save(logo_temp)
-        layers.append(ImageClip(logo_temp).with_duration(dur))
+        temp_l = os.path.join(base_dir, f"temp_logo_overlay_{job_id}_{i}.png")
+        logo_canvas.save(temp_l)
+        layers.append(ImageClip(temp_l).with_duration(dur))
 
-    final_clip = CompositeVideoClip(layers, size=(tw, th)).with_duration(dur)
-    if vo_clip: final_clip = final_clip.with_audio(vo_clip)
-    return final_clip
+    final = CompositeVideoClip(layers, size=(tw, th)).with_duration(dur)
+    if vo_clip: final = final.with_audio(vo_clip)
+    return final
 
-def render_cinematic_video(job_id, req, output_path, base_dir):
-    clips = []
-    final = None
-    logo_file_path = None
+async def render_cinematic_video(job_id, req, output_path, base_dir):
+    clips, final = [], None
     req_dict = req if isinstance(req, dict) else req.model_dump()
-    meta = req_dict.get('meta', {})
-    scenes = req_dict.get('scenes', [])
-    
+    meta, scenes = req_dict.get('meta', {}), req_dict.get('scenes', [])
+    logo_file_path = None
+
     try:
         if req_dict.get('logo_data') and ',' in req_dict.get('logo_data'):
             logo_data = base64.b64decode(req_dict.get('logo_data').split(',', 1)[1])
             logo_file_path = os.path.join(base_dir, f"temp_logo_{job_id}.png")
             Image.open(io.BytesIO(logo_data)).save(logo_file_path)
 
-        # Optimization: Use 720p for faster rendering
         tw, th = (720, 1280) if "Vertical" in req_dict.get('format', 'Vertical') else (1280, 720)
+
+        vo_tasks, vo_map = [], {}
+        for s in scenes:
+            if s.get('enable_vo') and s.get('caption'):
+                p = os.path.join(base_dir, f"temp_vo_{job_id}_{s['id']}.mp3")
+                vo_tasks.append(generate_edge_audio_async(s['caption'], req_dict.get('voice','en-US-ChristopherNeural'), p))
+                vo_map[s['id']] = {"path": p}
+        
+        if vo_tasks:
+            results = await asyncio.gather(*vo_tasks)
+            for sid, res in zip(vo_map.keys(), results):
+                vo_map[sid]["timings"] = res
 
         for i, scene in enumerate(scenes):
             clips.append(create_animated_clip(
                 job_id, i, scene, tw, th, (i==0), meta.get('address',''), meta.get('price',''), 
                 meta.get('beds',''), meta.get('baths',''), meta.get('sqft',''), req_dict.get('language','English'),
-                req_dict.get('font','Montserrat'), True, True, req_dict.get('voice','en-US-ChristopherNeural'),
-                req_dict.get('status_choice','Just Listed'), meta.get('agent',''), meta.get('brokerage',''),
-                meta.get('phone',''), meta.get('mls_source',''), meta.get('mls_number',''), 3.0, 'Auto',
-                req_dict.get('primary_color','#552448'), logo_file_path, base_dir
+                req_dict.get('font','Montserrat'), req_dict.get('show_price', True), req_dict.get('show_details', True), 
+                req_dict.get('voice','en-US-ChristopherNeural'), req_dict.get('status_choice','Just Listed'), 
+                meta.get('agent',''), meta.get('brokerage',''), meta.get('phone',''), meta.get('mls_source',''), 
+                meta.get('mls_number',''), 3.0, 'Auto', req_dict.get('primary_color','#552448'), logo_file_path, base_dir,
+                vo_data=vo_map.get(scene['id'])
             ))
 
-        end_screen = create_end_screen(
-            job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), meta.get('phone',''), meta.get('website',''), 5.0, 
-            req_dict.get('language','English'), meta.get('mls_source',''), meta.get('mls_number',''), 
-            req_dict.get('font','Montserrat'), req_dict.get('primary_color','#552448'), base_dir
-        )
-        clips.append(end_screen)
+        clips.append(create_end_screen(job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), meta.get('phone',''), meta.get('website',''), 5.0, req_dict.get('language','English'), meta.get('mls_source',''), meta.get('mls_number',''), req_dict.get('font','Montserrat'), req_dict.get('primary_color','#552448'), base_dir))
 
         final = concatenate_videoclips(clips)
+        m_choice = req_dict.get('music')
+        if m_choice and m_choice != "none" and m_choice in MUSIC_MAP:
+            m_file = os.path.join(base_dir, MUSIC_MAP[m_choice])
+            if os.path.exists(m_file):
+                bg = AudioFileClip(m_file)
+                if bg.duration < final.duration: bg = concatenate_audioclips([bg] * (int(final.duration / bg.duration) + 1))
+                bg = bg.with_duration(final.duration).with_volume_scaled(0.08)
+                final.audio = CompositeAudioClip([bg, final.audio]) if final.audio else bg
 
-        music_choice = req_dict.get('music')
-        if music_choice and music_choice != "none" and music_choice in MUSIC_MAP:
-            music_file = os.path.join(base_dir, MUSIC_MAP[music_choice])
-            if os.path.exists(music_file):
-                bg_music = AudioFileClip(music_file)
-                
-                if bg_music.duration < final.duration:
-                    bg_music = concatenate_audioclips([bg_music] * (int(final.duration / bg_music.duration) + 1))
-                
-                bg_music = bg_music.with_duration(final.duration).with_volume_scaled(0.08)
-                
-                if final.audio: 
-                    final.audio = CompositeAudioClip([bg_music, final.audio])
-                else: 
-                    final.audio = bg_music
-
-        final.write_videofile(
-            output_path, fps=24, 
-            codec="libx264", 
-            audio_codec="aac", 
-            # bitrate="3000k",
-            threads=4, 
-            preset="ultrafast", 
-            logger=None, 
-            ffmpeg_params=["-movflags", "faststart"]
-        )
+        final.write_videofile(output_path, fps=24, codec="libx264", audio_codec="aac", threads=4, preset="ultrafast", logger=None, ffmpeg_params=["-movflags", "faststart"])
         return True
-
     finally:
-        for c in clips:
+        for c in clips: 
             try: c.close()
             except: pass
         if final:
@@ -571,3 +388,46 @@ def render_cinematic_video(job_id, req, output_path, base_dir):
         for tf in glob.glob(os.path.join(base_dir, f"temp_*{job_id}*")):
             try: os.remove(tf)
             except: pass
+
+# # --- QUICK IMAGE TEST RUNNER ---
+# if __name__ == "__main__":
+#     print("Starting quick image test...")
+    
+#     # 1. Setup Test Variables
+#     test_base_dir = "."
+#     test_job_id = "quicktest"
+#     test_tw, test_th = 720, 1280 # Vertical format test
+    
+#     # 2. Create a dummy light-colored background to test the dark scrim & shadows
+#     dummy_bg = Image.new('RGB', (test_tw, test_th), (180, 190, 200)) 
+#     dummy_bg_path = os.path.join(test_base_dir, "test_dummy_bg.jpg")
+#     dummy_bg.save(dummy_bg_path)
+    
+#     test_scene_data = {'image_path': dummy_bg_path, 'caption': 'Test'}
+    
+#     # 3. Test the Title Screen (Includes scrim, drop shadows, icons, etc.)
+#     print("Rendering Title Screen frame...")
+#     title_clip = create_animated_clip(
+#         job_id=test_job_id, i=0, scene_data=test_scene_data, tw=test_tw, th=test_th, 
+#         is_first=True, addr="1234 Cinematic Way, Los Angeles, CA", price="2450000", 
+#         beds=5, baths=4, sqft=3200, lang="English", font_choice="Roboto-Bold", # Make sure this font exists in your /fonts folder
+#         show_price=True, show_details=True, voice_model="en-US-ChristopherNeural", 
+#         status_choice="Just Listed", agent_name="Jane Doe", brokerage="Prestige Realty", 
+#         phone="(555) 123-4567", mls_source="CRMLS", mls_number="SR24000000", 
+#         target_slide_dur=3.0, timing_mode="Auto", theme_color="#552448", 
+#         logo_path=None, base_dir=test_base_dir
+#     )
+#     title_clip.save_frame("test_output_title.png", t=0.0)
+    
+#     # 4. Test the End Screen (Includes Listing Courtesy Of & Auto-scaling text)
+#     print("Rendering End Screen frame...")
+#     end_clip = create_end_screen(
+#         job_id=test_job_id, target_w=test_tw, target_h=test_th, 
+#         agent_name="Jane Doe", brokerage="Prestige International Real Estate Group", # Long name to test scaling
+#         phone="(555) 123-4567", website="www.janedoerealestate.com", duration=5.0, 
+#         language="English", mls_source="CRMLS", mls_number="SR24000000", 
+#         font_choice="Montserrat", theme_color="#552448", base_dir=test_base_dir
+#     )
+#     end_clip.save_frame("test_output_endscreen.png", t=0.0)
+    
+#     print("Done! Open 'test_output_title.png' and 'test_output_endscreen.png' to check your layout.")
