@@ -73,7 +73,7 @@ def fetch_zillow_data(url: str):
 
     downloaded_paths = []
     # Limit to 15 images to keep the Next.js loading time reasonable
-    for i, img_url in enumerate(unique_urls[:25]):
+    for i, img_url in enumerate(unique_urls[:15]):
         try:
             res = requests.get(img_url, timeout=10)
             res.raise_for_status()

@@ -100,6 +100,27 @@ def background_render_task(job_id: str, req: RenderRequest):
                         file_options={"content-type": "video/mp4"}
                     )
                     final_video_url = supabase.storage.from_("listings").get_public_url(output_filename)
+                    # ... existing code ...
+            # final_video_url = supabase.storage.from_("listings").get_public_url(output_filename)
+
+                    # --- NEW: SAVE TO DATABASE ---
+                    # --- NEW: SAVE TO DATABASE ---
+                    if supabase and req.user_id:
+                        try:
+                            supabase.table("user_videos").insert({
+                                "user_id": req.user_id,
+                                "video_url": final_video_url,
+                                "property_address": req.meta.address if req.meta else "New Listing"
+                            }).execute()
+                            print(f"✅ Saved video to database for user {req.user_id}")
+                        except Exception as e:
+                            print(f"⚠️ Failed to save video record to DB: {e}")
+                    # -----------------------------
+                    # -----------------------------
+
+                    jobs[job_id]["status"] = "completed"
+                    jobs[job_id]["progress"] = 100
+            
                 except Exception as e:
                     print(f"Supabase video upload failed: {e}")
             # -------------------------------------------
@@ -111,58 +132,61 @@ def background_render_task(job_id: str, req: RenderRequest):
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)
-        
+
 @app.post("/api/fetch-zillow")
 async def fetch_zillow(req: FetchRequest):
-    # Same as before
     try:
         meta_data, downloaded_images = fetch_zillow_data(req.zillowUrl)
+        
+        # --- NEW: REMOVE DUPLICATES ---
+        # This trick removes duplicate images while keeping the house tour in the correct order!
+        downloaded_images = list(dict.fromkeys(downloaded_images))
+        
         fb_draft = generate_fb_post_content(meta_data, req.language)
         base_url = get_base_url()
         scenes = []
 
         for img_path in downloaded_images:
             analysis = analyze_image_with_gemini(img_path, req.language, meta_data.get('description', ''))
-            filename = os.path.basename(img_path)
             
-            # Fallback URL
-            public_url = f"{base_url}/raw_photos/{filename}"
+            # 1. Get the original name (e.g., "4048475_01.jpg")
+            original_filename = os.path.basename(img_path)
             
-            # --- NEW: UPLOAD PHOTO TO SUPABASE ---
+            # 2. CREATE A UNIQUE FILENAME (e.g., "a1b2c3d4_4048475_01.jpg")
+            unique_filename = f"{uuid.uuid4().hex[:8]}_{original_filename}"
+            
+            public_url = f"{base_url}/raw_photos/{original_filename}"
+            
             if supabase:
                 try:
                     with open(img_path, "rb") as f:
                         file_bytes = f.read()
-                    # Upload to the 'listings' bucket
+                        
+                    # 3. Upload using the NEW unique filename
                     supabase.storage.from_("listings").upload(
-                        path=filename,
+                        path=unique_filename,
                         file=file_bytes,
                         file_options={"content-type": "image/jpeg"}
                     )
-                    # Get the permanent public URL
-                    public_url = supabase.storage.from_("listings").get_public_url(filename)
+                    
+                    # 4. Generate the URL using the NEW unique filename
+                    public_url = supabase.storage.from_("listings").get_public_url(unique_filename)
                 except Exception as e:
                     print(f"Supabase photo upload failed: {e}")
-            # -------------------------------------
 
             scenes.append({
                 "id": str(uuid.uuid4()),
                 "image_path": img_path, 
-                "image_url": public_url, # Frontend now uses permanent Supabase URL!
+                "image_url": public_url, 
                 "room_type": analysis.get("room_type", "Room"),
                 "caption": analysis.get("caption", "Beautiful Home"),
                 "effect": analysis.get("effect", "zoom_in"),
                 "enable_vo": True
             })
 
-            analysis = analyze_image_with_gemini(img_path, req.language, meta_data.get('description', ''))
-            scenes.append({
-                "id": str(uuid.uuid4()), "image_path": img_path, 
-                "image_url": f"{base_url}/raw_photos/{os.path.basename(img_path)}", 
-                "room_type": analysis.get("room_type", "Room"), "caption": analysis.get("caption", "Beautiful Home"),
-                "effect": analysis.get("effect", "zoom_in"), "enable_vo": True
-            })
         return {"meta": meta_data, "fbDraft": fb_draft, "scenes": scenes}
+
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

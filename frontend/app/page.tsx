@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
+import Link from 'next/link';
+// import { createClient } from "@supabase/supabase-js";
 import {
   Settings,
   Image as ImageIcon,
@@ -271,6 +272,24 @@ export default function CinematicListingApp() {
     }
   };
 
+  const handleFacebookShare = async () => {
+    if (!videoUrl) return;
+    
+    // 1. Copy the AI-generated caption to the user's clipboard
+    if (fbDraft) {
+      try {
+        await navigator.clipboard.writeText(fbDraft);
+        alert("✅ Caption copied to clipboard! Paste it into your Facebook post.");
+      } catch (err) {
+        console.error("Clipboard failed", err);
+      }
+    }
+    
+    // 2. Open the official Facebook Share window with the Supabase video link attached
+    const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(videoUrl)}`;
+    window.open(fbUrl, '_blank', 'width=600,height=500,scrollbars=yes');
+  };
+
   const handleRenderVideo = async () => {
     if (!userId) return setShowAuthModal(true); // Open modal if not logged in
     if (credits !== null && credits < 1) {
@@ -430,8 +449,31 @@ export default function CinematicListingApp() {
       setScenes(newScenes);
     }
   };
-  const removeScene = (index: number) =>
+  
+  const removeScene = async (index: number) => {
+    const sceneToRemove = scenes[index];
+
+    // 1. Optimistic UI Update: Instantly remove it from the screen so it feels fast
     setScenes(scenes.filter((_, i) => i !== index));
+
+    // 2. Background Cleanup: Delete the physical image file from Supabase
+    if (sceneToRemove.image_url && sceneToRemove.image_url.includes('supabase')) {
+      try {
+        // Extract just the exact filename from the end of the Supabase URL
+        const fileName = sceneToRemove.image_url.split('/').pop()?.split('?')[0];
+
+        if (fileName) {
+          const { error } = await supabase.storage
+            .from('listings')
+            .remove([fileName]);
+            
+          if (error) console.error("⚠️ Failed to delete image from Supabase:", error);
+        }
+      } catch (err) {
+        console.error("⚠️ Error cleaning up image:", err);
+      }
+    }
+  };
 
   const StepIndicator = () => (
     <div className="flex items-center justify-center gap-2 mb-8 text-sm font-medium">
@@ -603,6 +645,15 @@ export default function CinematicListingApp() {
                 Top Up
               </button>
             </div>
+
+            {/* NEW: MY VIDEOS LINK */}
+            {userId && (
+              <Link href="/dashboard" className="w-full mt-2 bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm font-medium text-neutral-300 transition-colors flex items-center justify-between group">
+                <span className="flex items-center gap-2"><Film className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" /> My Video Library</span>
+                <ChevronRight className="w-4 h-4 text-neutral-600 group-hover:text-neutral-400" />
+              </Link>
+            )}
+
           </div>
         </div>
 
@@ -1260,7 +1311,7 @@ export default function CinematicListingApp() {
                     </span>
                   </button>
                 </div>
-                <button className="flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold py-3.5 px-8 rounded-xl transition-all shadow-lg shadow-[#1877F2]/20 w-full sm:w-auto">
+                <button onClick={handleFacebookShare} className="flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold py-3.5 px-8 rounded-xl transition-all shadow-lg shadow-[#1877F2]/20 w-full sm:w-auto">
                   <Share2 className="w-5 h-5" /> Post to Facebook
                 </button>
               </div>
