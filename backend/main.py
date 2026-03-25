@@ -40,6 +40,7 @@ jobs = {}
 class FetchRequest(BaseModel):
     zillowUrl: str
     language: Optional[str] = "English"
+    user_id: Optional[str] = None
 
 class MetaDef(BaseModel):
     address: str
@@ -133,16 +134,26 @@ def background_render_task(job_id: str, req: RenderRequest):
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)
 
+# main.py
+
 @app.post("/api/fetch-zillow")
 async def fetch_zillow(req: FetchRequest):
+    # --- PRE-EMPTIVE CREDIT CHECK ---
+    # Check if user has at least 1 credit before allowing them to scrape
+    if supabase and req.user_id:
+        user_data = supabase.table("user_credits").select("balance").eq("user_id", req.user_id).single().execute()
+        if user_data.data and user_data.data.get("credits", 0) < 1:
+            raise HTTPException(
+                status_code=402, 
+                detail="Insufficient credits. Please top up your wallet to continue."
+            )
+
     try:
         meta_data, downloaded_images = fetch_zillow_data(req.zillowUrl)
-        
-        # --- NEW: REMOVE DUPLICATES ---
-        # This trick removes duplicate images while keeping the house tour in the correct order!
+        # ... rest of your existing fetch logic ...
         downloaded_images = list(dict.fromkeys(downloaded_images))
-        
         fb_draft = generate_fb_post_content(meta_data, req.language)
+        # ... (rest of the function)
         base_url = get_base_url()
         scenes = []
 
@@ -190,15 +201,23 @@ async def fetch_zillow(req: FetchRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# main.py
+
 @app.post("/api/render-video")
 async def start_render(req: RenderRequest, background_tasks: BackgroundTasks):
-    # --- CREDIT CHECK LOGIC ---
+    # --- ATOMIC CREDIT DEDUCTION ---
     if supabase and req.user_id:
-        # Atomic deduction RPC call
+        # Using the RPC call ensures the deduction is thread-safe
         response = supabase.rpc("deduct_credit", {"target_user_id": req.user_id}).execute()
+        
+        # If the RPC returns false or an error, trigger the payment required exception
         if not response.data:
-             raise HTTPException(status_code=402, detail="Insufficient credits")
+             raise HTTPException(
+                 status_code=402, 
+                 detail="Insufficient credits. Please top up your wallet."
+             )
 
+    # If check passes, proceed to queue the job
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "queued", "progress": 0, "video_url": None, "error": None}
     background_tasks.add_task(background_render_task, job_id, req)

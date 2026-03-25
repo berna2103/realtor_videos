@@ -23,6 +23,32 @@ from moviepy import (
     afx
 )
 
+# Define fixed icons for the pill (as requested in the visual look)
+ICON_MAP = {
+    'bed': "🛏", # These Unicode icons are placeholders.
+    'bath': "🛁",
+    'sqft': "📏"
+}
+
+# Define outline icons as point-draw data. 
+# Coordinate values are internal to a unit box and will be scaled.
+# Coordinate format: (x, y)
+# Define outline icons as lists of paths (to allow pen lifts)
+BED_PATHS = [
+    [(0.1, 0.2), (0.1, 0.8)], # left headboard
+    [(0.1, 0.6), (0.9, 0.6), (0.9, 0.8)], # bed frame
+    [(0.2, 0.6), (0.2, 0.4), (0.5, 0.4), (0.5, 0.6)] # pillow
+]
+BATH_PATHS = [
+    [(0.1, 0.5), (0.1, 0.8), (0.9, 0.8), (0.9, 0.5), (0.1, 0.5)], # tub
+    [(0.2, 0.8), (0.2, 0.9)], # left leg
+    [(0.8, 0.8), (0.8, 0.9)], # right leg
+    [(0.8, 0.5), (0.8, 0.1), (0.6, 0.1), (0.6, 0.2)] # showerhead
+]
+SQFT_PATHS = [
+    [(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8), (0.2, 0.2)] # square box
+]
+
 
 # Fix for MoviePy 1.0.3 & Pillow 10+
 if not hasattr(Image, 'ANTIALIAS'):
@@ -90,153 +116,139 @@ def wrap_text_by_pixels(text, font, max_pixels):
     if current_line: lines.append(' '.join(current_line))
     return lines
 
-def create_title_overlay(job_id, target_w, target_h, address, price, beds, baths, sqft, duration,
-                         language, font_choice, show_price, show_details, status_choice,
-                         agent_name, brokerage, phone, mls_source, mls_number,
-                         theme_color, base_dir, logo_path=None):
+def draw_unit_icon(draw, paths, center_x, center_y, scale_factor, color):
+    """Draws a unit outline icon from a list of paths."""
+    for path in paths:
+        scaled_points = [(p[0] * scale_factor + center_x - (scale_factor/2), 
+                          p[1] * scale_factor + center_y - (scale_factor/2)) for p in path]
+        draw.line(scaled_points, fill=color, width=2)
 
-    # ---------- BASE IMAGE ----------
-    img = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
-    overlay = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 120))
-    img = Image.alpha_composite(img, overlay)
-    draw = ImageDraw.Draw(img)
-    white = (255, 255, 255, 255)
+def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir):
+    if not show_details and not show_price:
+        return []
 
-    # ---------- SMART SCALING ----------
-    scale_ref = min(target_w, target_h)
-    max_w = int(target_w * 0.90)
+    # Text Colors from image reference
+    color_white = (255, 255, 255, 255)
+    color_light_gray = (210, 210, 210, 255) 
+    color_pill_fill = (25, 25, 25, 140) 
+    color_pill_outline = (255, 255, 255, 40) 
 
-    def get_fitted_font(text, font_choice, starting_size, base_dir):
-        if not text: return get_font(font_choice, starting_size, base_dir)
-        size = starting_size
-        font = get_font(font_choice, size, base_dir)
-        dummy_draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
-        
-        while size > 12: 
-            bbox = dummy_draw.textbbox((0, 0), str(text), font=font)
-            if (bbox[2] - bbox[0]) <= max_w:
-                break
-            size -= 4
-            font = get_font(font_choice, size, base_dir)
-        return font
+    overlay_img = Image.new('RGBA', (tw, th), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay_img)
+    
+    # Use the dynamic get_font helper to load the user's chosen font style
+    f_status = get_font(font_choice, int(th * 0.080), base_dir) # MASSIVE title
+    f_price = get_font(font_choice, int(th * 0.050), base_dir)  # Large price
+    f_pill = get_font(font_choice, int(th * 0.022), base_dir)   # Small pill text
+    f_addr = get_font(font_choice, int(th * 0.024), base_dir)   # Medium address
+    f_agent = get_font(font_choice, int(th * 0.018), base_dir)  # Agent contact
+    f_cta = get_font(font_choice, int(th * 0.024), base_dir)    # CTA
 
-    # ---------- STRINGS & FONTS ----------
-    title = status_choice.title()
-    price_str = f"${price}" if (show_price and price) else ""
-    cta_text = f"Schedule a Showing • {phone}" if phone else ""
+    # --- ABSOLUTE Y-POSITIONING (Creates the cinematic gap) ---
+    y_status = int(th * 0.20)
+    y_price = int(th * 0.32)
+    y_pill = int(th * 0.62)
+    y_addr = int(th * 0.74)
+    y_agent = int(th * 0.85)
+    y_cta = int(th * 0.91)
 
-    title_font = get_fitted_font(title, font_choice, int(scale_ref * 0.16), base_dir)
-    price_font = get_fitted_font(price_str, font_choice, int(scale_ref * 0.12), base_dir)
-    pill_font  = get_font(font_choice, int(scale_ref * 0.045), base_dir)
-    addr_font  = get_font(font_choice, int(scale_ref * 0.05), base_dir)
-    cta_font   = get_fitted_font(cta_text, font_choice, int(scale_ref * 0.045), base_dir)
+    # --- 1. Large Status Text ---
+    if status:
+        status_txt = status.strip()
+        bbox = draw.textbbox((0, 0), status_txt, font=f_status)
+        draw.text(((tw - (bbox[2] - bbox[0])) // 2, y_status), status_txt, font=f_status, fill=color_white)
 
-    # ---------- TITLE ----------
-    bbox = draw.textbbox((0, 0), title, font=title_font)
-    t_w, t_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
-    title_pos = ((target_w - t_w)//2, int(target_h * 0.32)) 
-    draw.text(title_pos, title, font=title_font, fill=white)
+    # --- 2. Medium Price Text ---
+    if show_price and price:
+        clean_price = str(price).replace('$', '').replace(',', '').strip()
+        try:
+            p_str = f"${int(float(clean_price)):,}"
+        except ValueError:
+            p_str = str(price)
 
-    # ---------- PRICE ----------
-    if price_str:
-        bbox = draw.textbbox((0, 0), price_str, font=price_font)
-        p_w, p_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
-        price_pos = ((target_w - p_w)//2, title_pos[1] + t_h + 10)
-        draw.text(price_pos, price_str, font=price_font, fill=(230,230,230,255))
+        bbox = draw.textbbox((0, 0), p_str, font=f_price)
+        draw.text(((tw - (bbox[2] - bbox[0])) // 2, y_price), p_str, font=f_price, fill=color_white)
 
-    # ---------- GLASS PILL WITH ICONS ----------
-    pill_y2 = None
+    # --- 3. The Details Pill (Spaced, no dots) ---
     if show_details:
-        parts = []
-        if beds: parts.append(f"🛏 {beds}")
-        if baths: parts.append(f"🛁 {baths}")
-        if sqft: parts.append(f"⬜ {sqft}")
+        details = []
+        if beds: details.append(('bed', str(beds) + " beds"))
+        if baths: details.append(('bath', str(baths) + " baths"))
+        if sqft: details.append(('sqft', str(sqft) + " Sqft."))
 
-        if parts:
-            pill_text = "   ".join(parts)
-            bbox = draw.textbbox((0, 0), pill_text, font=pill_font)
-            p_w, p_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
-
-            pad_x, pad_y = int(scale_ref*0.04), int(scale_ref*0.02)
-            pill_w = p_w + pad_x * 2
-            pill_h = p_h + pad_y * 2
-
-            pill_x1 = (target_w - pill_w)//2
-            pill_y1 = int(target_h * 0.55)
-            pill_y2 = pill_y1 + pill_h
-
-            pill_area = img.crop((pill_x1, pill_y1, pill_x1+pill_w, pill_y2))
-            blurred = pill_area.filter(ImageFilter.GaussianBlur(18))
-            img.paste(blurred, (pill_x1, pill_y1))
-
-            glass = Image.new('RGBA', (pill_w, pill_h), (255,255,255,60))
-            img.paste(glass, (pill_x1, pill_y1), glass)
-
-            draw.text(((target_w - p_w)//2, pill_y1 + pad_y - 5), pill_text, font=pill_font, fill=white)
-
-    # ---------- CTA ----------
-    if cta_text:
-        bbox = draw.textbbox((0,0), cta_text, font=cta_font)
-        c_w, c_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
-        cta_y = pill_y2 + int(target_h * 0.05) if pill_y2 else int(target_h*0.65)
-        draw.text(((target_w - c_w)//2, cta_y), cta_text, font=cta_font, fill=(255,255,255,230))
-
-    # ---------- ADDRESS (WITH WORD WRAP) ----------
-    if address:
-        address_lines = wrap_text_by_pixels(address, addr_font, max_w)
-        start_y = int(target_h * 0.80)
-        line_spacing = int(target_h * 0.01) 
-        
-        for line in address_lines:
-            bbox = draw.textbbox((0, 0), line, font=addr_font)
-            line_w = bbox[2] - bbox[0]
-            line_h = bbox[3] - bbox[1]
+        if details:
+            pill_h = int(th * 0.06)
+            icon_draw_scale = int(pill_h * 0.4)
+            gap_icon_text = int(tw * 0.015) # Gap between icon and text
+            gap_items = int(tw * 0.04)      # Gap between beds/baths/sqft blocks
             
-            x_pos = (target_w - line_w) // 2
-            draw.text((x_pos, start_y), line, font=addr_font, fill=(200, 200, 200, 255))
-            start_y += line_h + line_spacing
+            blocks_data = []
+            total_content_width = 0
 
-    # ---------- SAVE BASE ----------
+            # Calculate total width
+            for icon_type, txt_val in details:
+                txt_bbox = draw.textbbox((0, 0), txt_val, font=f_pill)
+                txt_w = txt_bbox[2] - txt_bbox[0]
+                block_w = icon_draw_scale + gap_icon_text + txt_w
+                blocks_data.append((icon_type, txt_val, block_w))
+                total_content_width += block_w
+
+            total_content_width += (len(details) - 1) * gap_items
+            ext_padding = int(tw * 0.06) # Padding inside the ends of the pill
+            pill_w = total_content_width + (ext_padding * 2)
+
+            px, py = (tw - pill_w) // 2, y_pill
+            
+            # Draw pill background
+            draw.rounded_rectangle([px, py, px + pill_w, py + pill_h], radius=pill_h // 2, fill=color_pill_fill, outline=color_pill_outline, width=2)
+
+            curr_x = px + ext_padding
+            icon_center_y = py + (pill_h // 2)
+
+            # Draw Icons and Text
+            for i, (icon_type, txt_val, block_w) in enumerate(blocks_data):
+                icon_paths = None
+                if icon_type == 'bed': icon_paths = BED_PATHS
+                elif icon_type == 'bath': icon_paths = BATH_PATHS
+                elif icon_type == 'sqft': icon_paths = SQFT_PATHS
+                
+                draw_unit_icon(draw, icon_paths, curr_x + (icon_draw_scale // 2), icon_center_y, icon_draw_scale, color_light_gray)
+                curr_x += icon_draw_scale + gap_icon_text
+
+                # Vertically center text in pill
+                txt_bbox = draw.textbbox((0, 0), txt_val, font=f_pill)
+                txt_h = txt_bbox[3] - txt_bbox[1]
+                text_y = py + (pill_h - txt_h) // 2 - int(th * 0.005) 
+                
+                draw.text((curr_x, text_y), txt_val, font=f_pill, fill=color_light_gray)
+                curr_x += (block_w - icon_draw_scale - gap_icon_text) + gap_items
+
+    # --- 4. Main Address Line (Preserve Casing) ---
+    if addr:
+        # We no longer split it, we use the whole address string just like the image
+        bbox = draw.textbbox((0, 0), addr, font=f_addr)
+        draw.text(((tw - (bbox[2] - bbox[0])) // 2, y_addr), addr, font=f_addr, fill=color_light_gray)
+
+    # --- 5. Agent Number & CTA ---
+    if phone:
+        agent_txt = f"Agent Contact: {phone}"
+        bbox = draw.textbbox((0, 0), agent_txt, font=f_agent)
+        draw.text(((tw - (bbox[2] - bbox[0])) // 2, y_agent), agent_txt, font=f_agent, fill=color_white)
+
+    cta_txt = "SCHEDULE SHOWING!"
+    bbox = draw.textbbox((0, 0), cta_txt, font=f_cta)
+    draw.text(((tw - (bbox[2] - bbox[0])) // 2, y_cta), cta_txt, font=f_cta, fill=color_white)
+
     temp = os.path.join(base_dir, f"temp_title_{job_id}.png")
-    img.save(temp)
+    overlay_img.save(temp)
+    return [ImageClip(temp).with_duration(dur)]
 
-    base_clip = ImageClip(temp).with_duration(duration)
-
-    # =========================================================
-    # 🎬 ANIMATIONS (CapCut Style)
-    # =========================================================
-    animated = base_clip.with_effects([
-        vfx.FadeIn(0.8),
-        vfx.FadeOut(0.8)
-    ]).resized(lambda t: 1 + 0.05 * (t/duration))
-
-    # =========================================================
-    # ✨ GRADIENT LIGHT SWEEP
-    # =========================================================
-    sweep = np.zeros((target_h, target_w, 4), dtype=np.uint8)
-
-    for x in range(target_w):
-        alpha = int(120 * (1 - abs((x / target_w) - 0.5) * 2))
-        sweep[:, x] = [255, 255, 255, max(0, alpha)]
-
-    sweep_img = Image.fromarray(sweep, 'RGBA')
-    sweep_path = os.path.join(base_dir, f"temp_sweep_{job_id}.png")
-    sweep_img.save(sweep_path)
-
-    sweep_clip = (
-        ImageClip(sweep_path)
-        .with_duration(duration)
-        .with_opacity(0.25)
-        .with_position(lambda t: (int(-target_w + (t/duration)*(2*target_w)), 0))
-    )
-
-    return CompositeVideoClip(
-        [animated, sweep_clip],
-        size=(target_w, target_h)
-    ).with_duration(duration)
-
-def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice, base_dir, timings=None):
+def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice, base_dir, timings=None, theme_color="#552448"):
     if not text: return []
+    
+    # Convert hex theme color to RGB for the highlight
+    rgb_highlight = hex_to_rgb(theme_color) + (255,)
+    
     base_font_size = int(target_h * 0.027)
     font = get_font(font_choice, base_font_size, base_dir)
     text = str(text).upper().strip()
@@ -292,15 +304,16 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
             if w_idx < len(timings):
                 start_time, end_time, _ = timings[w_idx]
                 if start_time >= duration: continue
-                end_time = min(end_time + 0.3, duration)
-                if end_time <= start_time: continue
+                # Add a small buffer to end_time for smoother visual transitions
+                display_end = min(end_time + 0.1, duration)
                 
                 hl_img = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
                 draw_hl = ImageDraw.Draw(hl_img)
-                draw_hl.text((x, y), word_text, font=font, fill=(218, 165, 32, 255))
+                # Apply the Brand Kit color here
+                draw_hl.text((x, y), word_text, font=font, fill=rgb_highlight)
                 hl_temp = os.path.join(base_dir, f"temp_hl_{job_id}_{hash_id}_{w_idx}.png") 
                 hl_img.save(hl_temp)
-                layers.append(ImageClip(hl_temp).with_start(start_time).with_duration(end_time - start_time))
+                layers.append(ImageClip(hl_temp).with_start(start_time).with_duration(display_end - start_time))
                 
     return layers
 
@@ -415,7 +428,6 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
     dur = target_slide_dur
     vo_clip, vo_timings = None, None
     
-    # ... existing voiceover code ...
     if scene_data.get('enable_vo') and scene_data.get('caption'):
         try:
             vo_path = os.path.join(base_dir, f"temp_vo_{job_id}_{scene_data['id']}.mp3") 
@@ -424,41 +436,59 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
             dur = max(target_slide_dur, vo_clip.duration + 0.3)
         except: pass
 
-    # --- NEW: JUST-IN-TIME IMAGE RECOVERY ---
     img_path = scene_data['image_path']
     img_url = scene_data.get('image_url')
     
-    # If Railway wiped the file, download it from Supabase back to local disk
     if not os.path.exists(img_path) and img_url and img_url.startswith('http'):
         r = requests.get(img_url)
         if r.status_code == 200:
             os.makedirs(os.path.dirname(img_path), exist_ok=True)
             with open(img_path, 'wb') as f:
                 f.write(r.content)
-    # ----------------------------------------
 
-    base = ImageClip(img_path).resized(height=th)
+    clip = ImageClip(img_path)
+    w, h = clip.size
+    target_ratio = tw / th
+    current_ratio = w / h
+
+    if current_ratio > target_ratio:
+        clip = clip.resized(height=th)
+        x_center = clip.w / 2
+        clip = clip.cropped(x1=x_center - tw/2, y1=0, x2=x_center + tw/2, y2=th)
+    else:
+        clip = clip.resized(width=tw)
+        y_center = clip.h / 2
+        clip = clip.cropped(x1=0, y1=y_center - th/2, x2=tw, y2=y_center + th/2)
     
+    base = clip
+
     animated = base.resized(lambda t: 1.0 + 0.15 * ease_in_out(t, dur))
 
     if is_first: 
-        overlay_layers = [create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status_choice, agent_name, brokerage, phone, mls_source, mls_number, theme_color, base_dir)]
+        # BUG 1 FIXED HERE: Removed the extra [ ] brackets
+        overlay_layers = create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status_choice, agent_name, brokerage, phone, mls_source, mls_number, theme_color, base_dir)
     else: 
-        overlay_layers = create_glass_caption(job_id, scene_data['caption'], dur, tw, th, font_choice, base_dir, vo_timings)
+        overlay_layers = create_glass_caption(
+            job_id, 
+            scene_data['caption'], 
+            dur, 
+            tw, 
+            th, 
+            font_choice, 
+            base_dir, 
+            vo_timings,
+            theme_color=theme_color 
+        )
         
     layers = [animated.with_duration(dur)]
     layers.extend(overlay_layers)
     
-    # LOGO MASKING FIX (The Green Square Destroyer)
     if logo_path and os.path.exists(logo_path):
         logo_canvas = Image.new('RGBA', (tw, th), (0, 0, 0, 0))
         logo_img = Image.open(logo_path).convert("RGBA")
-        
         logo_w = int(tw * 0.16)
         logo_img.thumbnail((logo_w, logo_w), Image.Resampling.LANCZOS)
-        
         logo_canvas.paste(logo_img, (40, 40), mask=logo_img)
-        
         logo_temp = os.path.join(base_dir, f"temp_logo_overlay_{job_id}_{i}.png")
         logo_canvas.save(logo_temp)
         layers.append(ImageClip(logo_temp).with_duration(dur))

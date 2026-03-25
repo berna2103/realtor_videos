@@ -60,8 +60,14 @@ def fetch_zillow_data(url: str):
     if data.get("bedrooms"): meta["beds"] = str(data.get("bedrooms"))
     if data.get("bathrooms"): meta["baths"] = str(data.get("bathrooms"))
     
-    if data.get("livingArea"): meta["sqft"] = f"{data.get('livingArea'):,}"
-    elif data.get("livingAreaValue"): meta["sqft"] = f"{int(data.get('livingAreaValue')):,}"
+    # scraper.py - Update the meta extraction logic
+    if data.get("living_area_sqft"): 
+        meta["sqft"] = f"{int(data.get('living_area_sqft')):,}"
+    elif data.get("livingArea"): 
+        meta["sqft"] = f"{int(data.get('livingArea')):,}"
+    elif data.get("livingAreaValue"): 
+        meta["sqft"] = f"{int(data.get('livingAreaValue')):,}"
+    # elif data.get("livingAreaValue"): meta["sqft"] = f"{int(data.get('livingAreaValue')):,}"
 
     # Extract images
     image_urls = data.get("image_urls", [])

@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from 'next/link';
-// import { createClient } from "@supabase/supabase-js";
+import Link from "next/link";
 import {
   Settings,
   Image as ImageIcon,
@@ -27,14 +26,18 @@ import {
   LogOut,
   X,
   User,
+  Info,
+  RefreshCw,
+  AlertCircle,
+  Plus,
 } from "lucide-react";
+
+import { useAuth } from "../context/AuthContext";
+import { supabase } from "../../frontend/lib/supabase";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const STRIPE_PRICE_ID_5_CREDITS =
   process.env.NEXT_PUBLIC_STRIPE_PRICE_ID || "price_XXXXXX";
-
-// Initialize Supabase client
-import { supabase } from "../../frontend/lib/supabase"; // Adjust the path as needed
 
 interface Scene {
   id: string;
@@ -73,10 +76,7 @@ const RENDER_MESSAGES = [
 ];
 
 export default function CinematicListingApp() {
-  // --- AUTHENTICATION STATES ---
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [credits, setCredits] = useState<number | null>(null);
+  const { user, email: userEmail, credits, signOut, refreshCredits } = useAuth();
 
   // Auth Modal States
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -87,23 +87,24 @@ export default function CinematicListingApp() {
 
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [isOwnListing, setIsOwnListing] = useState<boolean>(true);
+  const [showMobileSettings, setShowMobileSettings] = useState(false);
+  const [showTopUpModal, setShowTopUpModal] = useState(false);
 
-  // --- ORIGINAL STATES ---
+  // Workflow States
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [isLoading, setIsLoading] = useState(false);
   const [zillowUrl, setZillowUrl] = useState("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-
   const [isRendering, setIsRendering] = useState(false);
   const [renderMsgIdx, setRenderMsgIdx] = useState(0);
 
+  // Media Settings
   const [format, setFormat] = useState("Vertical (1080x1920)");
   const [language, setLanguage] = useState("English");
   const [voice, setVoice] = useState("en-US-ChristopherNeural");
   const [font, setFont] = useState("Roboto");
   const [music, setMusic] = useState("real_estate_upbeat");
   const [timingMode, setTimingMode] = useState("Auto");
-
   const [primaryColor, setPrimaryColor] = useState("#552448");
   const [logoData, setLogoData] = useState<string | null>(null);
 
@@ -123,7 +124,6 @@ export default function CinematicListingApp() {
   const [fbDraft, setFbDraft] = useState("");
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [statusChoice, setStatusChoice] = useState("Just Listed");
-
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
@@ -131,43 +131,6 @@ export default function CinematicListingApp() {
     isOwnListing ||
     (meta.agent && meta.brokerage && meta.mls_source && meta.mls_number);
 
-  // --- FETCH USER & CREDITS ON LOAD ---
-  const fetchUserAndCredits = async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (session?.user) {
-      setUserId(session.user.id);
-      setUserEmail(session.user.email || null);
-
-      const { data, error } = await supabase
-        .from("user_credits")
-        .select("balance")
-        .eq("user_id", session.user.id)
-        .maybeSingle(); // <-- CHANGED FROM .single()
-
-      if (data) setCredits(data.balance);
-      else setCredits(0); // Safely defaults to 0 if no row exists yet
-    } else {
-      setUserId(null);
-      setUserEmail(null);
-      setCredits(null);
-    }
-  };
-
-  useEffect(() => {
-    fetchUserAndCredits();
-
-    // Listen for auth changes (like logging in or out)
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      fetchUserAndCredits();
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // --- AUTHENTICATION HANDLERS ---
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthLoading(true);
@@ -178,20 +141,12 @@ export default function CinematicListingApp() {
           password: authPassword,
         });
         if (error) throw error;
-
-        // Check if email confirmation is required (User exists, but no active session)
         if (data.user && !data.session) {
-          alert(
-            "Success! Please check your email inbox for a confirmation link to activate your account.",
-          );
-          setIsSignUp(false); // Flip the modal to "Log In" mode for when they come back
-          setAuthPassword(""); // Clear the password for security
-        } else {
-          // If email confirmation is turned off in Supabase
-          alert("Account created successfully! You are now logged in.");
-          setShowAuthModal(false);
-          setAuthEmail("");
+          alert("Success! Check your inbox for a confirmation link.");
+          setIsSignUp(false);
           setAuthPassword("");
+        } else {
+          setShowAuthModal(false);
         }
       } else {
         const { error } = await supabase.auth.signInWithPassword({
@@ -200,41 +155,32 @@ export default function CinematicListingApp() {
         });
         if (error) throw error;
         setShowAuthModal(false);
-        setAuthEmail("");
-        setAuthPassword("");
       }
     } catch (error: any) {
-      alert(error.message || "An error occurred during authentication.");
+      alert(error.message || "Auth failed.");
     } finally {
       setAuthLoading(false);
     }
   };
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-  };
-
-  // --- STRIPE CHECKOUT ---
   const handleBuyCredits = async () => {
-    if (!userId) return setShowAuthModal(true); // Open modal instead of alert
+    if (!user) return setShowAuthModal(true);
     setIsCheckingOut(true);
     try {
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, priceId: STRIPE_PRICE_ID_5_CREDITS }),
+        body: JSON.stringify({ userId: user.id, priceId: STRIPE_PRICE_ID_5_CREDITS }),
       });
       const data = await res.json();
       if (data.url) window.location.href = data.url;
     } catch (e) {
-      console.error(e);
       alert("Checkout failed.");
     } finally {
       setIsCheckingOut(false);
     }
   };
 
-  // --- ORIGINAL FUNCTIONS ---
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -244,8 +190,6 @@ export default function CinematicListingApp() {
     }
   };
 
-  const removeLogo = () => setLogoData(null);
-
   const handleFetchData = async () => {
     setIsLoading(true);
     try {
@@ -254,19 +198,18 @@ export default function CinematicListingApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ zillowUrl, language }),
       });
-
-      if (!response.ok) throw new Error("Backend returned an error");
-
+      if (response.status === 402) {
+        setShowTopUpModal(true);
+        return;
+      }
+      if (!response.ok) throw new Error("Backend error");
       const data = await response.json();
       setMeta({ ...meta, ...data.meta });
       setFbDraft(data.fbDraft);
       setScenes(data.scenes);
       setStep(2);
     } catch (error) {
-      console.error(error);
-      alert(
-        "Failed to fetch data. Make sure your backend is running and URL is correct!",
-      );
+      alert("Failed to fetch data.");
     } finally {
       setIsLoading(false);
     }
@@ -274,43 +217,33 @@ export default function CinematicListingApp() {
 
   const handleFacebookShare = async () => {
     if (!videoUrl) return;
-    
-    // 1. Copy the AI-generated caption to the user's clipboard
     if (fbDraft) {
       try {
         await navigator.clipboard.writeText(fbDraft);
-        alert("✅ Caption copied to clipboard! Paste it into your Facebook post.");
+        alert("✅ Caption copied!");
       } catch (err) {
         console.error("Clipboard failed", err);
       }
     }
-    
-    // 2. Open the official Facebook Share window with the Supabase video link attached
     const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(videoUrl)}`;
-    window.open(fbUrl, '_blank', 'width=600,height=500,scrollbars=yes');
+    window.open(fbUrl, "_blank", "width=600,height=500,scrollbars=yes");
   };
 
   const handleRenderVideo = async () => {
-    if (!userId) return setShowAuthModal(true); // Open modal if not logged in
-    if (credits !== null && credits < 1) {
-      alert("You are out of credits! Please top up your wallet to render.");
-      return;
-    }
-
+    if (!user) return setShowAuthModal(true);
+    if (credits !== null && credits < 1) return alert("Out of credits!");
     setIsRendering(true);
     setRenderMsgIdx(0);
-    const msgInterval = setInterval(() => {
-      setRenderMsgIdx((prev) => (prev + 1) % RENDER_MESSAGES.length);
-    }, 8000);
-
+    const msgInterval = setInterval(
+      () => setRenderMsgIdx((p) => (p + 1) % RENDER_MESSAGES.length),
+      8000
+    );
     try {
-      if (credits !== null) setCredits(credits - 1);
-
       const res = await fetch(`${API_URL}/api/render-video`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: userId,
+          user_id: user.id,
           meta,
           scenes,
           format,
@@ -326,105 +259,48 @@ export default function CinematicListingApp() {
           logo_data: logoData,
         }),
       });
-
-      if (!res.ok) {
-        if (res.status === 402)
-          alert("Insufficient credits detected by server.");
-        throw new Error("Render request failed");
-      }
-
       const data = await res.json();
-      const jobId = data.job_id;
-
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusRes = await fetch(`${API_URL}/api/job-status/${jobId}`);
-
-          if (!statusRes.ok) {
-            clearInterval(pollInterval);
-            clearInterval(msgInterval);
-            alert("Connection lost or server restarted. The render failed.");
-            setIsRendering(false);
-            if (credits !== null) setCredits(credits);
-            return;
-          }
-
-          const statusData = await statusRes.json();
-
-          if (statusData.status === "completed") {
-            clearInterval(pollInterval);
-            clearInterval(msgInterval);
-            setVideoUrl(statusData.video_url);
-            setIsRendering(false);
-            setStep(3);
-            fetchUserAndCredits(); // Refresh credits securely from server
-          } else if (statusData.status === "failed") {
-            clearInterval(pollInterval);
-            clearInterval(msgInterval);
-            alert("Render failed: " + statusData.error);
-            setIsRendering(false);
-            if (credits !== null) setCredits(credits);
-          }
-        } catch (e) {
-          console.error("Polling error", e);
+      const poll = setInterval(async () => {
+        const sRes = await fetch(`${API_URL}/api/job-status/${data.job_id}`);
+        const sData = await sRes.json();
+        if (sData.status === "completed") {
+          clearInterval(poll);
+          clearInterval(msgInterval);
+          setVideoUrl(sData.video_url);
+          setIsRendering(false);
+          setStep(3);
+          refreshCredits();
+        } else if (sData.status === "failed") {
+          clearInterval(poll);
+          clearInterval(msgInterval);
+          alert(`Render failed. Check console for details.`);
+          setIsRendering(false);
+          refreshCredits();
         }
       }, 3000);
-    } catch (error) {
-      console.error(error);
-      clearInterval(msgInterval);
-      alert("Failed to connect to the render engine.");
+    } catch (e: any) {
       setIsRendering(false);
-      if (credits !== null) setCredits(credits);
+      clearInterval(msgInterval);
+      alert(`Request failed: ${e.message || "Check console for details"}`);
+      refreshCredits();
     }
   };
 
   const handleForceDownload = async () => {
     if (!videoUrl) return;
     setIsDownloading(true);
-    setDownloadProgress(0);
     try {
       const response = await fetch(videoUrl);
-      if (!response.ok) throw new Error("Network response was not ok");
-      const contentLength = response.headers.get("content-length");
-      const total = contentLength ? parseInt(contentLength, 10) : 0;
-      let blob;
-      if (total && response.body) {
-        const reader = response.body.getReader();
-        let received = 0;
-        const chunks = [];
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          received += value.length;
-          setDownloadProgress(Math.round((received / total) * 100));
-        }
-        blob = new Blob(chunks, {
-          type: response.headers.get("content-type") || "video/mp4",
-        });
-      } else {
-        blob = await response.blob();
-        setDownloadProgress(100);
-      }
-      const blobUrl = window.URL.createObjectURL(blob);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.style.display = "none";
-      a.href = blobUrl;
-      const safeName = meta.address
-        ? meta.address.replace(/[^a-z0-9]/gi, "_").toLowerCase()
-        : "cinematic-listing";
-      a.download = `${safeName}.mp4`;
-      document.body.appendChild(a);
+      a.href = url;
+      a.download = `${meta.address || "video"}.mp4`;
       a.click();
-      window.URL.revokeObjectURL(blobUrl);
-      document.body.removeChild(a);
-    } catch (error) {
+    } catch (e) {
       window.open(videoUrl, "_blank");
     } finally {
-      setTimeout(() => {
-        setIsDownloading(false);
-        setDownloadProgress(0);
-      }, 1000);
+      setIsDownloading(false);
     }
   };
 
@@ -433,902 +309,612 @@ export default function CinematicListingApp() {
     newScenes[index] = { ...newScenes[index], [field]: value };
     setScenes(newScenes);
   };
+
   const moveScene = (index: number, direction: "up" | "down") => {
     const newScenes = [...scenes];
-    if (direction === "up" && index > 0) {
+    if (direction === "up" && index > 0)
       [newScenes[index - 1], newScenes[index]] = [
         newScenes[index],
         newScenes[index - 1],
       ];
-      setScenes(newScenes);
-    } else if (direction === "down" && index < scenes.length - 1) {
+    else if (direction === "down" && index < scenes.length - 1)
       [newScenes[index + 1], newScenes[index]] = [
         newScenes[index],
         newScenes[index + 1],
       ];
-      setScenes(newScenes);
-    }
+    setScenes(newScenes);
   };
-  
+
   const removeScene = async (index: number) => {
-    const sceneToRemove = scenes[index];
-
-    // 1. Optimistic UI Update: Instantly remove it from the screen so it feels fast
+    const scene = scenes[index];
     setScenes(scenes.filter((_, i) => i !== index));
-
-    // 2. Background Cleanup: Delete the physical image file from Supabase
-    if (sceneToRemove.image_url && sceneToRemove.image_url.includes('supabase')) {
-      try {
-        // Extract just the exact filename from the end of the Supabase URL
-        const fileName = sceneToRemove.image_url.split('/').pop()?.split('?')[0];
-
-        if (fileName) {
-          const { error } = await supabase.storage
-            .from('listings')
-            .remove([fileName]);
-            
-          if (error) console.error("⚠️ Failed to delete image from Supabase:", error);
-        }
-      } catch (err) {
-        console.error("⚠️ Error cleaning up image:", err);
-      }
+    if (scene.image_url?.includes("supabase")) {
+      const fileName = scene.image_url.split("/").pop()?.split("?")[0];
+      if (fileName) await supabase.storage.from("listings").remove([fileName]);
     }
   };
 
-  const StepIndicator = () => (
-    <div className="flex items-center justify-center gap-2 mb-8 text-sm font-medium">
-      <div
-        className={`flex items-center gap-2 ${step >= 1 ? "text-indigo-400" : "text-neutral-600"}`}
-      >
-        <span
-          className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 1 ? "bg-indigo-500/20" : "bg-neutral-800"}`}
-        >
-          1
-        </span>{" "}
-        Extract
-      </div>
-      <ChevronRight className="w-4 h-4 text-neutral-600" />
-      <div
-        className={`flex items-center gap-2 ${step >= 2 ? "text-indigo-400" : "text-neutral-600"}`}
-      >
-        <span
-          className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 2 ? "bg-indigo-500/20" : "bg-neutral-800"}`}
-        >
-          2
-        </span>{" "}
-        Storyboard
-      </div>
-      <ChevronRight className="w-4 h-4 text-neutral-600" />
-      <div
-        className={`flex items-center gap-2 ${step === 3 ? "text-indigo-400" : "text-neutral-600"}`}
-      >
-        <span
-          className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step === 3 ? "bg-indigo-500/20" : "bg-neutral-800"}`}
-        >
-          3
-        </span>{" "}
-        Render
-      </div>
-    </div>
-  );
+  const handleStartOver = () => {
+    setStep(1);
+    setScenes([]);
+    setZillowUrl("");
+    setShowMobileSettings(false);
+  };
 
-  return (
-    <div className="min-h-screen bg-[#0a0a0a] text-neutral-200 font-sans flex flex-col md:flex-row selection:bg-indigo-500/30">
-      {/* AUTH MODAL OVERLAY */}
-      {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-md p-6 shadow-2xl shadow-indigo-500/10">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-white">
-                {isSignUp ? "Create an Account" : "Welcome Back"}
-              </h3>
-              <button
-                onClick={() => setShowAuthModal(false)}
-                className="text-neutral-500 hover:text-white transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAuthSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-neutral-400 mb-1.5">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none transition-all text-white"
-                  placeholder="agent@example.com"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-neutral-400 mb-1.5">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none transition-all text-white"
-                  placeholder="••••••••"
-                />
-              </div>
-              <button
-                disabled={authLoading}
-                type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center mt-2 disabled:opacity-50"
-              >
-                {authLoading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : isSignUp ? (
-                  "Sign Up"
-                ) : (
-                  "Log In"
-                )}
-              </button>
-            </form>
-
-            <div className="mt-6 text-center text-sm text-neutral-500">
-              {isSignUp ? "Already have an account?" : "Don't have an account?"}
-              <button
-                onClick={() => setIsSignUp(!isSignUp)}
-                className="ml-2 text-indigo-400 hover:text-indigo-300 font-medium"
-              >
-                {isSignUp ? "Log In" : "Sign Up"}
-              </button>
-            </div>
+  const SidebarSettings = () => (
+    <div className="space-y-8">
+      <section className="space-y-4">
+        <h3 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest flex items-center gap-2">
+          <Palette className="w-3.5 h-3.5" /> Brand Identity
+        </h3>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between bg-neutral-900/50 p-2 rounded-lg border border-neutral-800">
+            <span className="text-xs text-neutral-400">Primary Color</span>
+            <input
+              type="color"
+              value={primaryColor}
+              onChange={(e) => setPrimaryColor(e.target.value)}
+              className="w-6 h-6 rounded bg-transparent border-none cursor-pointer"
+            />
           </div>
-        </div>
-      )}
-
-      {/* SIDEBAR */}
-      <aside className="w-full md:w-80 bg-neutral-900/40 backdrop-blur-xl border-r border-neutral-800/60 p-6 flex flex-col gap-6 overflow-y-auto order-2 md:order-1 z-10">
-        <div className="flex flex-col gap-4 pb-4 border-b border-neutral-800/60">
-          <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-violet-600 to-indigo-600 p-2 rounded-lg shadow-lg shadow-indigo-500/20">
-              <Video className="w-5 h-5 text-white" />
-            </div>
-            <h1 className="text-xl font-bold tracking-tight text-white">
-              Cinematic<span className="text-indigo-400 font-light">AI</span>
-            </h1>
-          </div>
-
-          {/* USER PROFILE & WALLET UI */}
-          <div className="flex flex-col gap-3">
-            {userId ? (
-              <div className="bg-neutral-950/50 border border-neutral-800 rounded-xl p-3 flex items-center justify-between">
-                <div className="flex items-center gap-2.5 overflow-hidden">
-                  <div className="bg-neutral-800 p-1.5 rounded-full">
-                    <User className="w-4 h-4 text-neutral-400" />
-                  </div>
-                  <span className="text-xs font-medium text-neutral-300 truncate">
-                    {userEmail}
-                  </span>
-                </div>
+          <div className="space-y-2">
+            <span className="text-xs text-neutral-400">Brokerage Logo</span>
+            {logoData ? (
+              <div className="relative group rounded-lg overflow-hidden bg-neutral-950 border border-neutral-800 p-2">
+                <img src={logoData} className="max-h-12 mx-auto object-contain" />
                 <button
-                  onClick={handleSignOut}
-                  className="text-xs text-neutral-500 hover:text-red-400 transition-colors p-1.5"
+                  onClick={() => setLogoData(null)}
+                  className="absolute inset-0 bg-red-500/80 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <Trash2 className="w-4 h-4 text-white" />
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setShowAuthModal(true)}
-                className="w-full bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-xl p-3 text-sm font-medium text-neutral-300 transition-colors flex items-center justify-center gap-2"
-              >
-                <LogIn className="w-4 h-4" /> Sign In or Create Account
-              </button>
+              <label className="flex flex-col items-center justify-center border border-dashed border-neutral-800 py-4 rounded-lg hover:bg-white/5 cursor-pointer transition-colors group">
+                <Upload className="w-4 h-4 text-neutral-600 mb-1 group-hover:text-indigo-400" />
+                <span className="text-[10px] text-neutral-500">Upload PNG</span>
+                <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+              </label>
             )}
-
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Coins className="w-4 h-4 text-amber-400" />
-                <span className="text-sm font-medium text-neutral-300">
-                  {credits !== null ? `${credits} Credits` : "0 Credits"}
-                </span>
-              </div>
-              <button
-                onClick={handleBuyCredits}
-                disabled={isCheckingOut}
-                className="text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 font-semibold px-3 py-1.5 rounded-md transition-colors flex items-center gap-1.5"
-              >
-                {isCheckingOut ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <CreditCard className="w-3 h-3" />
-                )}{" "}
-                Top Up
-              </button>
-            </div>
-
-            {/* NEW: MY VIDEOS LINK */}
-            {userId && (
-              <Link href="/dashboard" className="w-full mt-2 bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 rounded-xl p-3 text-sm font-medium text-neutral-300 transition-colors flex items-center justify-between group">
-                <span className="flex items-center gap-2"><Film className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" /> My Video Library</span>
-                <ChevronRight className="w-4 h-4 text-neutral-600 group-hover:text-neutral-400" />
-              </Link>
-            )}
-
           </div>
         </div>
+      </section>
 
-        <div className="space-y-6 flex-1">
-          {/* Brand Kit */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
-              <Palette className="w-3.5 h-3.5" /> Brand Kit
-            </h3>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-neutral-400">
-                Primary Color
-              </label>
-              <div className="flex items-center gap-3">
-                <div className="relative w-8 h-8 rounded-full overflow-hidden border-2 border-neutral-700 shadow-inner">
-                  <input
-                    type="color"
-                    value={primaryColor}
-                    onChange={(e) => setPrimaryColor(e.target.value)}
-                    className="absolute -inset-2 w-12 h-12 cursor-pointer"
-                  />
-                </div>
-                <span className="text-sm font-mono text-neutral-400">
-                  {primaryColor.toUpperCase()}
-                </span>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-neutral-400">
-                Brokerage Logo
-              </label>
-              {logoData ? (
-                <div className="relative bg-neutral-950/50 border border-neutral-800 rounded-lg p-2 flex items-center justify-between">
-                  <img
-                    src={logoData}
-                    alt="Logo"
-                    className="h-8 w-auto object-contain max-w-[150px]"
-                  />
-                  <button
-                    onClick={removeLogo}
-                    className="p-1.5 text-red-400 hover:bg-red-500/10 rounded-md transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <label className="border border-dashed border-neutral-700 bg-neutral-950/30 rounded-xl p-4 text-center cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all group block">
-                  <Upload className="w-5 h-5 mx-auto mb-2 text-neutral-500 group-hover:text-indigo-400 transition-colors" />
-                  <span className="text-xs text-neutral-400 group-hover:text-neutral-300">
-                    Upload Logo (PNG preferred)
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleLogoUpload}
-                  />
-                </label>
-              )}
-            </div>
+      <section className="space-y-4">
+        <h3 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest flex items-center gap-2">
+          <Settings className="w-3.5 h-3.5" /> Media Settings
+        </h3>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-[11px] text-neutral-500 ml-1">Aspect Ratio</label>
+            <select
+              value={format}
+              onChange={(e) => setFormat(e.target.value)}
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2 text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+            >
+              <option>Vertical (1080x1920)</option>
+              <option>Landscape (1920x1080)</option>
+              <option>Square (1080x1080)</option>
+            </select>
           </div>
-
-          <hr className="border-neutral-800/60" />
-
-          {/* Media Settings */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
-              <Settings className="w-3.5 h-3.5" /> Media Settings
-            </h3>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-neutral-400">
-                Format
-              </label>
+          <div className="space-y-1.5">
+            <label className="text-[11px] text-neutral-500 ml-1">Typography Style</label>
+            <select
+              value={font}
+              onChange={(e) => setFont(e.target.value)}
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2 text-xs outline-none"
+            >
+              <option value="Roboto">Roboto</option>
+              <option value="Inter">Inter</option>
+              <option value="Cinzel">Cinzel</option>
+              <option value="Playfair">Playfair Display</option>
+              <option value="Prata">Prata</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[11px] text-neutral-500 ml-1">Voice & Language</label>
+            <div className="grid grid-cols-2 gap-2">
               <select
-                value={format}
-                onChange={(e) => setFormat(e.target.value)}
-                className="w-full bg-neutral-950/50 border border-neutral-800 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="bg-neutral-900 border border-neutral-800 rounded-lg p-2 text-xs outline-none"
               >
-                <option>Vertical (1080x1920)</option>
-                <option>Landscape (1920x1080)</option>
-                <option>Square (1080x1080)</option>
+                <option>English</option>
+                <option>Spanish</option>
               </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-neutral-400">
-                Language
-              </label>
-              <div className="flex gap-2 bg-neutral-950/50 p-1 rounded-lg border border-neutral-800">
-                <button
-                  onClick={() => setLanguage("English")}
-                  className={`flex-1 py-1.5 text-sm rounded-md ${language === "English" ? "bg-neutral-800 text-white" : "text-neutral-400"}`}
-                >
-                  English
-                </button>
-                <button
-                  onClick={() => setLanguage("Spanish")}
-                  className={`flex-1 py-1.5 text-sm rounded-md ${language === "Spanish" ? "bg-neutral-800 text-white" : "text-neutral-400"}`}
-                >
-                  Spanish
-                </button>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-neutral-400">
-                Typography Style
-              </label>
-              <select
-                value={font}
-                onChange={(e) => setFont(e.target.value)}
-                className="w-full bg-neutral-950/50 border border-neutral-800 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
-              >
-                <option value="Roboto">Roboto</option>
-                <option value="Inter">Inter</option>
-                <option value="Cinzel">Cinzel</option>
-                <option value="Playfair">Playfair Display</option>
-                <option value="Prata">Prata</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-neutral-400">
-                Voice Actor
-              </label>
               <select
                 value={voice}
                 onChange={(e) => setVoice(e.target.value)}
-                className="w-full bg-neutral-950/50 border border-neutral-800 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                className="bg-neutral-900 border border-neutral-800 rounded-lg p-2 text-xs outline-none"
               >
                 <option value="en-US-ChristopherNeural">Christopher</option>
                 <option value="en-US-JennyNeural">Jenny</option>
                 <option value="es-MX-JorgeNeural">Jorge</option>
               </select>
             </div>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-neutral-400">
-                Background Music
-              </label>
-              <select
-                value={music}
-                onChange={(e) => setMusic(e.target.value)}
-                className="w-full bg-neutral-950/50 border border-neutral-800 rounded-lg p-2.5 text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
-              >
-                <option value="none">No Music</option>
-                <option value="Upbeat">Upbeat</option>
-                <option value="Luxury">Luxury</option>
-                <option value="Motivation">Motivation</option>
-              </select>
-            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[11px] text-neutral-500 ml-1">Soundtrack</label>
+            <select
+              value={music}
+              onChange={(e) => setMusic(e.target.value)}
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2 text-xs outline-none"
+            >
+              <option value="none">No Music</option>
+              <option value="Upbeat">Upbeat</option>
+              <option value="Luxury">Luxury</option>
+              <option value="Motivation">Motivation</option>
+            </select>
           </div>
         </div>
+      </section>
+    </div>
+  );
 
-        {step > 1 && !isRendering && (
-          <button
-            onClick={() => {
-              setStep(1);
-              setScenes([]);
-            }}
-            className="mt-auto w-full py-2.5 px-4 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 rounded-lg text-sm text-neutral-300 transition-all"
-          >
-            Start Over
-          </button>
-        )}
-      </aside>
+  return (
+    <div className="min-h-screen bg-[#0a0a0a] text-neutral-200 font-sans flex flex-col selection:bg-indigo-500/30 overflow-hidden">
+      {/* AUTH MODAL */}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-white">
+                {isSignUp ? "Create Account" : "Welcome Back"}
+              </h3>
+              <button onClick={() => setShowAuthModal(false)}>
+                <X className="w-5 h-5 text-neutral-500 hover:text-white" />
+              </button>
+            </div>
+            <form onSubmit={handleAuthSubmit} className="space-y-4">
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none transition-all text-white"
+                placeholder="Email"
+              />
+              <input
+                type="password"
+                required
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm focus:border-indigo-500 outline-none transition-all text-white"
+                placeholder="Password"
+              />
+              <button
+                disabled={authLoading}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 py-3 rounded-xl font-semibold text-white transition-colors flex items-center justify-center"
+              >
+                {authLoading ? <Loader2 className="animate-spin" /> : isSignUp ? "Sign Up" : "Log In"}
+              </button>
+            </form>
+            <button
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="mt-4 text-xs text-indigo-400 w-full text-center hover:underline"
+            >
+              {isSignUp ? "Already have an account? Log In" : "Don't have an account? Sign Up"}
+            </button>
+          </div>
+        </div>
+      )}
 
-      {/* MAIN CONTENT AREA */}
-      <main className="flex-1 p-6 md:p-10 overflow-y-auto order-1 md:order-2 relative flex flex-col">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-indigo-500/10 blur-[120px] rounded-full pointer-events-none" />
+      {/* HEADER NAV */}
+      <nav className="h-16 border-b border-neutral-800/60 bg-black/40 backdrop-blur-xl flex items-center justify-between px-6 z-30 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="bg-gradient-to-br from-violet-600 to-indigo-600 p-1.5 rounded-lg">
+            <Video className="w-5 h-5 text-white" />
+          </div>
+          <h1 className="text-xl font-bold text-white hidden sm:block">
+            Cinematic<span className="text-indigo-400 font-light">AI</span>
+          </h1>
+        </div>
+        <div className="flex items-center gap-4">
+          {user && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-neutral-900 border border-neutral-800 rounded-full">
+              <Coins className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-bold text-neutral-300">{credits}</span>
+              <button
+                onClick={handleBuyCredits}
+                className="ml-1 text-[10px] bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full hover:bg-indigo-500/30 transition-colors"
+              >
+                Top Up
+              </button>
+            </div>
+          )}
+          {user ? (
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-neutral-500 hidden md:block">{userEmail}</span>
+              <button
+                onClick={signOut}
+                className="p-2 text-neutral-500 hover:text-red-400 transition-colors"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="text-sm font-semibold text-indigo-400 px-4 py-2 hover:bg-indigo-500/10 rounded-lg transition-colors"
+            >
+              Sign In
+            </button>
+          )}
+        </div>
+      </nav>
 
-        <div className="relative z-10 max-w-5xl mx-auto w-full">
-          {!isRendering && <StepIndicator />}
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* DESKTOP SIDEBAR */}
+        <aside className="hidden lg:flex w-72 border-r border-neutral-800/60 flex-col bg-neutral-950/20 overflow-y-auto p-6 gap-8 flex-shrink-0">
+          <SidebarSettings />
+          <div className="mt-auto space-y-2">
+            {step > 1 && !isRendering && (
+              <button
+                onClick={handleStartOver}
+                className="w-full p-3 bg-neutral-900 border border-neutral-800 rounded-xl text-xs text-neutral-400 hover:text-white transition-colors flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-3 h-3" /> Start Over
+              </button>
+            )}
+            {user && (
+              <Link
+                href="/dashboard"
+                className="flex items-center justify-between p-3 bg-neutral-900/50 hover:bg-neutral-900 border border-neutral-800 rounded-xl transition-colors group"
+              >
+                <span className="text-xs font-medium flex items-center gap-2">
+                  <Film className="w-4 h-4 text-indigo-400" /> Library
+                </span>
+                <ChevronRight className="w-4 h-4 text-neutral-600 group-hover:translate-x-1 transition-transform" />
+              </Link>
+            )}
+          </div>
+        </aside>
 
-          {/* RENDERING OVERLAY */}
-          {isRendering && (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] animate-in fade-in zoom-in-95 duration-700">
-              <div className="relative mb-8">
-                <div className="absolute inset-0 bg-indigo-500 blur-2xl opacity-20 rounded-full animate-pulse" />
-                <div className="w-24 h-24 bg-neutral-900 border-2 border-indigo-500/50 rounded-full flex items-center justify-center relative z-10">
-                  <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
+        {/* MAIN CANVAS */}
+        <main className="flex-1 overflow-y-auto custom-scrollbar bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-indigo-500/5 via-transparent to-transparent">
+          <div className="max-w-4xl mx-auto p-6 md:p-12">
+            {isRendering ? (
+              <div className="flex flex-col items-center justify-center min-h-[60vh] py-12 animate-in fade-in duration-700">
+                <div className="w-32 h-32 rounded-full border-2 border-indigo-500/30 flex items-center justify-center bg-neutral-900 mb-12">
+                  <Loader2 className="w-12 h-12 text-indigo-500 animate-spin" />
                 </div>
-              </div>
-              <h2 className="text-3xl md:text-4xl font-bold text-white mb-4 text-center">
-                Rendering your video...
-              </h2>
-              <div className="h-8 flex items-center justify-center mb-8">
-                <p
-                  className="text-xl text-indigo-300 animate-pulse text-center"
-                  key={renderMsgIdx}
-                >
+                <h2 className="text-4xl font-black text-white mb-4 tracking-tighter">Crafting Your Tour</h2>
+                <p className="text-xl text-indigo-300 font-medium animate-pulse text-center max-w-md">
                   {RENDER_MESSAGES[renderMsgIdx]}
                 </p>
-              </div>
-              <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 max-w-md w-full backdrop-blur-md">
-                <div className="flex items-start gap-4">
-                  <div className="p-3 bg-amber-500/10 rounded-xl">
-                    <Clock className="w-6 h-6 text-amber-500" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white mb-1">
-                      Do not close this tab!
-                    </h4>
-                    <p className="text-sm text-neutral-400 leading-relaxed">
-                      HD video rendering is highly demanding. This process can
-                      take{" "}
-                      <strong className="text-white">up to 5 minutes</strong> to
-                      complete.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 1: FETCH */}
-          {step === 1 && !isRendering && (
-            <div className="max-w-2xl mx-auto mt-16 text-center animate-in fade-in slide-in-from-bottom-4 duration-700">
-              <h2 className="text-4xl md:text-5xl font-extrabold mb-4 text-white tracking-tight">
-                Automate your listings.
-              </h2>
-              <p className="text-lg text-neutral-400 mb-10">
-                Paste a Zillow URL. We'll extract the photos, analyze the rooms,
-                and build a cinematic storyboard instantly.
-              </p>
-
-              <div className="p-2 bg-neutral-900/50 backdrop-blur-md rounded-2xl border border-neutral-800 shadow-2xl flex flex-col sm:flex-row gap-2">
-                <div className="relative flex-1">
-                  <LinkIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
-                  <input
-                    type="text"
-                    value={zillowUrl}
-                    onChange={(e) => setZillowUrl(e.target.value)}
-                    placeholder="https://www.zillow.com/homedetails/..."
-                    className="w-full bg-transparent py-4 pl-12 pr-4 text-white focus:outline-none placeholder:text-neutral-600"
-                  />
-                </div>
-                <button
-                  onClick={handleFetchData}
-                  disabled={isLoading || !zillowUrl}
-                  className="bg-white hover:bg-neutral-200 text-black disabled:opacity-50 font-semibold py-4 px-8 rounded-xl flex items-center justify-center gap-2 transition-all w-full sm:w-auto"
-                >
-                  {isLoading ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    "Generate Script"
-                  )}
-                </button>
-              </div>
-
-              {isLoading && (
-                <div className="mt-8 flex justify-center animate-in fade-in slide-in-from-top-4 duration-500">
-                  <div className="flex items-center gap-3 bg-indigo-500/10 border border-indigo-500/20 px-5 py-3 rounded-full text-sm font-medium text-indigo-300 shadow-lg shadow-indigo-500/5">
-                    <Sparkles className="w-4 h-4 animate-pulse text-indigo-400" />
-                    Extracting photos and running AI analysis... (approx. 15
-                    sec)
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* STEP 2: EDIT STORYBOARD */}
-          {step === 2 && !isRendering && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
-              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-3xl font-bold text-white tracking-tight">
-                    Review Storyboard
-                  </h2>
-                  <p className="text-neutral-400 mt-1">
-                    Adjust camera movements, captions, and property details.
+                <div className="mt-12 bg-neutral-900/80 border border-neutral-800 p-6 rounded-2xl flex items-start gap-4 max-w-sm">
+                  <Clock className="w-5 h-5 text-amber-500 shrink-0 mt-1" />
+                  <p className="text-sm text-neutral-400">
+                    Rendering takes <strong className="text-white">up to 5 minutes</strong>. Keep this tab open.
                   </p>
                 </div>
-                <button
-                  onClick={handleRenderVideo}
-                  disabled={isLoading || !isCompliant}
-                  className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold py-3 px-8 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-indigo-500/25 w-full md:w-auto justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Film className="w-4 h-4" /> Render HD Video (1 Credit)
-                </button>
               </div>
-
-              <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 backdrop-blur-sm">
-                <div className="mb-6 pb-6 border-b border-neutral-800/60">
-                  <label className="block text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-3">
-                    Listing Status & Angle
-                  </label>
+            ) : step === 1 ? (
+              <div className="text-center py-20 animate-in fade-in slide-in-from-bottom-6 duration-700">
+                <h2 className="text-5xl md:text-7xl font-black text-white tracking-tighter mb-6 leading-[0.9]">
+                  Turn any listing <br /> into cinema.
+                </h2>
+                <div className="p-2 bg-neutral-900/40 border border-neutral-800 rounded-2xl max-w-2xl mx-auto flex flex-col sm:flex-row gap-2 shadow-2xl backdrop-blur-xl">
+                  <div className="relative flex-1 flex items-center px-4">
+                    <LinkIcon className="w-5 h-5 text-neutral-600 mr-3" />
+                    <input
+                      type="text"
+                      value={zillowUrl}
+                      onChange={(e) => setZillowUrl(e.target.value)}
+                      placeholder="https://www.zillow.com/homedetails/..."
+                      className="w-full bg-transparent py-4 text-white focus:outline-none placeholder:text-neutral-700 font-medium"
+                    />
+                  </div>
+                  <button
+                    onClick={handleFetchData}
+                    disabled={isLoading || !zillowUrl}
+                    className="bg-white hover:bg-neutral-200 text-black px-8 py-4 rounded-xl font-bold transition-all min-w-[160px]"
+                  >
+                    {isLoading ? <Loader2 className="animate-spin mx-auto" /> : "Build Tour"}
+                  </button>
+                </div>
+              </div>
+            ) : step === 2 ? (
+              <div className="space-y-12 pb-32 animate-in fade-in duration-700">
+                <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+                  <div>
+                    <h2 className="text-4xl font-black text-white tracking-tighter">Production Suite</h2>
+                    <p className="text-neutral-500 font-medium">Fine-tune your scenes.</p>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     {[
                       "Coming Soon",
                       "Just Listed",
-                      "For Sale",
+                      "Home For Sale",
                       "Open House",
                       "Price Reduced",
                       "Under Contract",
                       "Just Sold",
-                    ].map((status) => (
+                    ].map((s) => (
                       <button
-                        key={status}
-                        onClick={() => setStatusChoice(status)}
-                        className={`px-4 py-2 text-xs font-medium rounded-full transition-all ${statusChoice === status ? "bg-indigo-500 text-white shadow-md shadow-indigo-500/20" : "bg-neutral-950 border border-neutral-800 text-neutral-400 hover:text-neutral-200 hover:border-neutral-600"}`}
+                        key={s}
+                        onClick={() => setStatusChoice(s)}
+                        className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border ${statusChoice === s ? "bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-500/30" : "bg-neutral-900 text-neutral-500 border-neutral-800 hover:border-neutral-700"}`}
                       >
-                        {status}
+                        {s}
                       </button>
                     ))}
                   </div>
-                </div>
+                </header>
 
-                <h3 className="text-sm font-semibold mb-5 text-neutral-300 uppercase tracking-wider">
-                  Property Details & Compliance
-                </h3>
-
-                <div className="mb-6 bg-neutral-950/50 p-4 rounded-xl border border-neutral-800">
-                  <label className="block text-sm font-medium text-neutral-300 mb-3">
-                    Is this your active listing?
-                  </label>
-                  <div className="flex gap-4">
-                    <button
-                      onClick={() => setIsOwnListing(true)}
-                      className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${isOwnListing ? "bg-indigo-500 text-white" : "bg-neutral-900 text-neutral-400 border border-neutral-700"}`}
+                <div className="grid grid-cols-1 gap-10">
+                  {scenes.map((scene, index) => (
+                    <div
+                      key={scene.id}
+                      className="group flex flex-col lg:flex-row bg-neutral-900/40 border border-neutral-800 rounded-3xl overflow-hidden hover:border-indigo-500/30 transition-all duration-500"
                     >
-                      Yes, it's my listing
-                    </button>
-                    <button
-                      onClick={() => setIsOwnListing(false)}
-                      className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${!isOwnListing ? "bg-indigo-500 text-white" : "bg-neutral-900 text-neutral-400 border border-neutral-700"}`}
-                    >
-                      No, I'm promoting it
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                      Your Phone (End Screen)
-                    </label>
-                    <input
-                      type="text"
-                      value={meta.phone || ""}
-                      onChange={(e) =>
-                        setMeta({ ...meta, phone: e.target.value })
-                      }
-                      placeholder="(555) 123-4567"
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                      Your Website (End Screen)
-                    </label>
-                    <input
-                      type="text"
-                      value={meta.website || ""}
-                      onChange={(e) =>
-                        setMeta({ ...meta, website: e.target.value })
-                      }
-                      placeholder="www.example.com"
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                </div>
-
-                {!isOwnListing && (
-                  <div className="mb-6 p-4 border border-amber-500/30 bg-amber-500/5 rounded-xl">
-                    <p className="text-xs text-amber-400 mb-4">
-                      You must provide listing attribution to stay compliant
-                      with local MLS rules.
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                      <div>
-                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                          Listing Agent <span className="text-red-400">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={meta.agent}
-                          onChange={(e) =>
-                            setMeta({ ...meta, agent: e.target.value })
-                          }
-                          className="w-full bg-neutral-950 border border-amber-500/30 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none transition-all"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                          Listing Brokerage{" "}
-                          <span className="text-red-400">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={meta.brokerage}
-                          onChange={(e) =>
-                            setMeta({ ...meta, brokerage: e.target.value })
-                          }
-                          className="w-full bg-neutral-950 border border-amber-500/30 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none transition-all"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                          Data Source (e.g., MRED){" "}
-                          <span className="text-red-400">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={meta.mls_source}
-                          onChange={(e) =>
-                            setMeta({ ...meta, mls_source: e.target.value })
-                          }
-                          className="w-full bg-neutral-950 border border-amber-500/30 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none transition-all"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                          MLS Number <span className="text-red-400">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={meta.mls_number}
-                          onChange={(e) =>
-                            setMeta({ ...meta, mls_number: e.target.value })
-                          }
-                          className="w-full bg-neutral-950 border border-amber-500/30 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none transition-all"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-4">
-                  <div className="col-span-1 md:col-span-2">
-                    <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                      Property Address
-                    </label>
-                    <input
-                      type="text"
-                      value={meta.address}
-                      onChange={(e) =>
-                        setMeta({ ...meta, address: e.target.value })
-                      }
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                      Price
-                    </label>
-                    <input
-                      type="text"
-                      value={meta.price}
-                      onChange={(e) =>
-                        setMeta({ ...meta, price: e.target.value })
-                      }
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                      Beds
-                    </label>
-                    <input
-                      type="text"
-                      value={meta.beds}
-                      onChange={(e) =>
-                        setMeta({ ...meta, beds: e.target.value })
-                      }
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                      Baths
-                    </label>
-                    <input
-                      type="text"
-                      value={meta.baths}
-                      onChange={(e) =>
-                        setMeta({ ...meta, baths: e.target.value })
-                      }
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                      SqFt
-                    </label>
-                    <input
-                      type="text"
-                      value={meta.sqft}
-                      onChange={(e) =>
-                        setMeta({ ...meta, sqft: e.target.value })
-                      }
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {scenes.map((scene, index) => (
-                  <div
-                    key={scene.id}
-                    className="bg-neutral-900/40 border border-neutral-800 rounded-2xl overflow-hidden hover:border-neutral-700 transition-all flex flex-col group"
-                  >
-                    <div className="aspect-video bg-neutral-950 flex items-center justify-center relative overflow-hidden">
-                      {scene.image_url ? (
+                      <div className="lg:w-[40%] aspect-video bg-black relative overflow-hidden">
                         <img
                           src={scene.image_url}
-                          alt={scene.room_type}
-                          className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-500 group-hover:scale-105"
+                          className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all duration-700"
                         />
-                      ) : (
-                        <ImageIcon className="w-8 h-8 text-neutral-700" />
-                      )}
-                      <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-md text-xs font-bold text-white shadow-sm border border-white/10">
-                        {index + 1}. {scene.room_type}
+                        <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 text-[10px] font-black text-indigo-400 tracking-tighter">
+                          SCENE {index + 1}
+                        </div>
                       </div>
-                    </div>
-                    <div className="p-5 flex flex-col gap-4 flex-1">
-                      <div>
-                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                          Voiceover Script
-                        </label>
-                        <textarea
-                          value={scene.caption}
-                          onChange={(e) =>
-                            updateScene(index, "caption", e.target.value)
-                          }
-                          className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm h-20 resize-none focus:border-indigo-500 outline-none transition-all"
-                        />
-                      </div>
-                      <div className="flex items-end justify-between gap-3">
-                        <div className="flex-1">
-                          <label className="block text-xs font-medium text-neutral-500 mb-1.5">
-                            Camera Effect
+                      <div className="flex-1 p-8 flex flex-col justify-between gap-6">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">
+                            Voiceover Script
                           </label>
+                          <textarea
+                            value={scene.caption}
+                            onChange={(e) => updateScene(index, "caption", e.target.value)}
+                            className="w-full bg-neutral-950/50 border border-neutral-800 rounded-xl p-4 text-sm font-medium focus:border-indigo-500/50 outline-none transition-all resize-none leading-relaxed h-28"
+                          />
+                        </div>
+                        <div className="flex flex-col sm:flex-row items-center gap-4 pt-4 border-t border-neutral-800/50">
                           <select
                             value={scene.effect}
-                            onChange={(e) =>
-                              updateScene(index, "effect", e.target.value)
-                            }
-                            className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm focus:border-indigo-500 outline-none transition-all"
+                            onChange={(e) => updateScene(index, "effect", e.target.value)}
+                            className="flex-1 w-full bg-neutral-950 border border-neutral-800 rounded-xl p-3 text-xs font-bold outline-none focus:border-indigo-500/50"
                           >
-                            <option value="zoom_in">Zoom In</option>
+                            <option value="zoom_in">Slow Zoom In</option>
                             <option value="drone_rise">Drone Rise</option>
-                            <option value="parallax_depth">
-                              Parallax Depth
-                            </option>
-                            <option value="slow_zoom_in">Slow Zoom In</option>
+                            <option value="parallax_depth">Parallax</option>
                           </select>
+                          <div className="flex items-center gap-1.5 ml-auto">
+                            <button
+                              onClick={() => moveScene(index, "up")}
+                              disabled={index === 0}
+                              className="p-2 bg-neutral-950 border border-neutral-800 rounded-lg hover:text-white disabled:opacity-20 transition-colors"
+                            >
+                              <ArrowUp className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => moveScene(index, "down")}
+                              disabled={index === scenes.length - 1}
+                              className="p-2 bg-neutral-950 border border-neutral-800 rounded-lg hover:text-white disabled:opacity-20 transition-colors"
+                            >
+                              <ArrowDown className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => removeScene(index)}
+                              className="p-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 mb-2.5">
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={scene.enable_vo}
-                              onChange={(e) =>
-                                updateScene(
-                                  index,
-                                  "enable_vo",
-                                  e.target.checked,
-                                )
-                              }
-                              className="sr-only peer"
-                            />
-                            <div className="w-9 h-5 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
-                            <span className="ml-2 text-xs font-medium text-neutral-400">
-                              VO
-                            </span>
-                          </label>
-                        </div>
-                      </div>
-                      <div className="flex gap-1.5 mt-auto pt-4 border-t border-neutral-800/60">
-                        <button
-                          onClick={() => moveScene(index, "up")}
-                          disabled={index === 0}
-                          className="p-2 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg disabled:opacity-30 transition-colors"
-                        >
-                          <ArrowUp className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => moveScene(index, "down")}
-                          disabled={index === scenes.length - 1}
-                          className="p-2 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg disabled:opacity-30 transition-colors"
-                        >
-                          <ArrowDown className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => removeScene(index)}
-                          className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg ml-auto flex items-center gap-1.5 text-xs font-medium transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" /> Remove
-                        </button>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: RESULT */}
-          {step === 3 && videoUrl && !isRendering && (
-            <div className="max-w-4xl mx-auto mt-10 animate-in fade-in zoom-in-95 duration-700">
-              <div className="text-center mb-8">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/10 mb-4">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+                  ))}
                 </div>
-                <h2 className="text-3xl font-bold text-white tracking-tight">
-                  Render Complete
-                </h2>
               </div>
-
-              <div
-                className={`bg-black rounded-3xl overflow-hidden ring-1 ring-white/10 shadow-2xl shadow-indigo-500/10 mb-8 relative group max-h-[70vh] mx-auto flex justify-center ${
-                  format.includes("Vertical")
-                    ? "aspect-[9/16] w-auto"
-                    : format.includes("Square")
-                      ? "aspect-square w-full max-w-2xl"
-                      : "aspect-video w-full"
-                }`}
-              >
-                <video
-                  src={videoUrl}
-                  controls
-                  className="w-full h-full object-contain"
-                  autoPlay
-                />
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-                <div className="w-full sm:w-auto flex flex-col items-center">
+            ) : (
+              <div className="max-w-3xl mx-auto py-12 animate-in fade-in zoom-in-95 duration-700">
+                <div className="text-center mb-12">
+                  <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-500" />
+                  </div>
+                  <h2 className="text-4xl font-black text-white tracking-tighter">Tour is Ready</h2>
+                </div>
+                <div
+                  className={`mx-auto bg-black rounded-[32px] overflow-hidden shadow-2xl ring-1 ring-white/10 ${format.includes("Vertical") ? "aspect-[9/16] w-72" : "aspect-video w-full"}`}
+                >
+                  <video src={videoUrl!} controls autoPlay className="w-full h-full object-contain" />
+                </div>
+                <div className="flex flex-col sm:flex-row justify-center gap-4 mt-12">
                   <button
                     onClick={handleForceDownload}
                     disabled={isDownloading}
-                    className="flex items-center justify-center gap-2 bg-white hover:bg-neutral-200 text-black font-semibold py-3.5 px-8 rounded-xl transition-all shadow-lg w-full sm:w-auto disabled:opacity-80 relative overflow-hidden"
+                    className="flex-1 bg-white text-black py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-neutral-200 transition-all"
                   >
-                    {isDownloading && (
-                      <div
-                        className="absolute left-0 top-0 bottom-0 bg-indigo-500/20 transition-all duration-300 ease-out"
-                        style={{ width: `${downloadProgress}%` }}
-                      />
-                    )}
-                    <span className="relative flex items-center gap-2 z-10">
-                      {isDownloading ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />{" "}
-                          {downloadProgress}%
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-5 h-5" /> Download MP4
-                        </>
-                      )}
-                    </span>
+                    {isDownloading ? <Loader2 className="animate-spin" /> : <Download className="w-5 h-5" />} Download MP4
+                  </button>
+                  <button
+                    onClick={handleFacebookShare}
+                    className="flex-1 bg-[#1877F2] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-[#166fe5] transition-all"
+                  >
+                    <Share2 className="w-5 h-5" /> Facebook
                   </button>
                 </div>
-                <button onClick={handleFacebookShare} className="flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold py-3.5 px-8 rounded-xl transition-all shadow-lg shadow-[#1877F2]/20 w-full sm:w-auto">
-                  <Share2 className="w-5 h-5" /> Post to Facebook
-                </button>
               </div>
-              <div className="mt-12 bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 backdrop-blur-sm">
-                <h3 className="text-sm font-semibold mb-3 text-neutral-300 flex items-center gap-2">
-                  <span>📝</span> Suggested Post Copy
-                </h3>
-                <textarea
-                  readOnly
-                  value={fbDraft}
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-sm h-28 resize-none text-neutral-400 focus:outline-none focus:border-indigo-500 transition-colors leading-relaxed"
-                />
+            )}
+          </div>
+        </main>
+
+        {/* DESKTOP RIGHT SIDEBAR */}
+        {step === 2 && !isRendering && (
+          <aside className="hidden xl:flex w-80 border-l border-neutral-800/60 flex-col bg-neutral-950/20 overflow-y-auto p-6 gap-8 flex-shrink-0">
+            <section className="space-y-6">
+              <h3 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">Metadata</h3>
+              <div className="space-y-4">
+                {[
+                  { label: "Address", key: "address" },
+                  { label: "Price", key: "price" },
+                  { label: "Beds", key: "beds", short: true },
+                  { label: "Baths", key: "baths", short: true },
+                  { label: "SqFt", key: "sqft", short: true },
+                ].map((f) => (
+                  <div key={f.key} className={f.short ? "inline-block w-1/3 pr-2" : ""}>
+                    <label className="text-[10px] text-neutral-600 mb-1 block uppercase tracking-tighter">{f.label}</label>
+                    <input
+                      type="text"
+                      value={(meta as any)[f.key]}
+                      onChange={(e) => setMeta({ ...meta, [f.key]: e.target.value })}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500/50"
+                    />
+                  </div>
+                ))}
               </div>
+            </section>
+
+            <section className="space-y-4">
+              <h3 className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">Compliance</h3>
+              <div className="bg-amber-500/5 border border-amber-500/10 p-4 rounded-xl space-y-4">
+                <div className="flex gap-2 p-1 bg-black rounded-lg border border-neutral-800">
+                  <button
+                    onClick={() => setIsOwnListing(true)}
+                    className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-md transition-all ${isOwnListing ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-500"}`}
+                  >
+                    My Listing
+                  </button>
+                  <button
+                    onClick={() => setIsOwnListing(false)}
+                    className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-md transition-all ${!isOwnListing ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-500"}`}
+                  >
+                    Co-Broke
+                  </button>
+                </div>
+                {!isOwnListing && (
+                  <div className="space-y-3 animate-in fade-in duration-300">
+                    <input
+                      type="text"
+                      placeholder="Listing Agent"
+                      value={meta.agent}
+                      onChange={(e) => setMeta({ ...meta, agent: e.target.value })}
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2 text-xs outline-none focus:border-indigo-500/50"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Brokerage"
+                      value={meta.brokerage}
+                      onChange={(e) => setMeta({ ...meta, brokerage: e.target.value })}
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2 text-xs outline-none focus:border-indigo-500/50"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Source"
+                        value={meta.mls_source}
+                        onChange={(e) => setMeta({ ...meta, mls_source: e.target.value })}
+                        className="bg-neutral-950 border border-neutral-800 rounded-lg p-2 text-xs outline-none"
+                      />
+                      <input
+                        type="text"
+                        placeholder="MLS #"
+                        value={meta.mls_number}
+                        onChange={(e) => setMeta({ ...meta, mls_number: e.target.value })}
+                        className="bg-neutral-950 border border-neutral-800 rounded-lg p-2 text-xs outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <div className="mt-auto">
+              <button
+                onClick={handleRenderVideo}
+                disabled={!isCompliant}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-5 rounded-[24px] font-black uppercase tracking-widest text-xs shadow-2xl shadow-indigo-600/40 transition-all flex items-center justify-center gap-3 disabled:opacity-30"
+              >
+                <Film className="w-5 h-5" /> Render Tour
+              </button>
+              {!isCompliant && (
+                <p className="text-[10px] text-red-400 mt-3 text-center animate-pulse tracking-tighter">
+                  Missing attribution details
+                </p>
+              )}
             </div>
-          )}
+          </aside>
+        )}
+      </div>
+
+      {/* MOBILE SETTINGS DRAWER */}
+      {showMobileSettings && (
+        <div className="fixed inset-0 z-50 lg:hidden animate-in fade-in duration-200">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowMobileSettings(false)}
+          />
+          <div className="absolute bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 rounded-t-[32px] p-8 max-h-[85vh] overflow-y-auto slide-in-from-bottom duration-300">
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="text-xl font-bold text-white tracking-tight">Production Settings</h3>
+              <button onClick={() => setShowMobileSettings(false)} className="p-2 bg-neutral-800 rounded-full text-neutral-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-8">
+              <SidebarSettings />
+              <button
+                onClick={handleStartOver}
+                className="w-full p-4 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+              >
+                Start Over
+              </button>
+            </div>
+          </div>
         </div>
-      </main>
+      )}
+
+      {/* MOBILE ACTION BAR */}
+      {step === 2 && !isRendering && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 p-4 bg-black/80 backdrop-blur-xl border-t border-neutral-800 z-40 flex gap-3">
+          <button
+            onClick={() => setShowMobileSettings(true)}
+            className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl text-white shadow-xl transition-all active:scale-95 flex items-center justify-center"
+          >
+            <Settings className="w-6 h-6" />
+          </button>
+          <button
+            onClick={handleRenderVideo}
+            disabled={!isCompliant}
+            className="flex-1 bg-indigo-600 py-4 rounded-2xl font-black uppercase tracking-widest text-xs text-white flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/30 disabled:opacity-30 active:scale-95 transition-all"
+          >
+            <Film className="w-5 h-5" /> Render HD Tour
+          </button>
+        </div>
+      )}
+
+      {/* INSUFFICIENT CREDITS MODAL */}
+      {showTopUpModal && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-neutral-900 border border-white/10 p-8 md:p-12 rounded-[2.5rem] max-w-md w-full text-center relative shadow-2xl">
+            <div className="bg-amber-500/10 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 border border-amber-500/20">
+              <AlertCircle className="w-10 h-10 text-amber-500" />
+            </div>
+            <h2 className="text-3xl font-bold text-white mb-4">Wallet Empty</h2>
+            <p className="text-neutral-400 mb-8 leading-relaxed">
+              To keep our AI engines running and rendering cinematic videos, we require active credits. Top up now to
+              continue.
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={handleBuyCredits}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+              >
+                <Plus className="w-5 h-5" /> Buy Credits
+              </button>
+              <button
+                onClick={() => setShowTopUpModal(false)}
+                className="py-3 text-neutral-500 hover:text-white transition-colors text-sm font-medium"
+              >
+                Return to Dashboard
+              </button>
+            </div>
+            <p className="mt-8 text-[10px] text-neutral-600 uppercase tracking-widest font-bold">
+              Secure Checkout via Stripe
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
