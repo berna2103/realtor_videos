@@ -34,6 +34,13 @@ SQFT_PATHS = [[(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8), (0.2, 0.2)]]
 
 MUSIC_MAP = {"Upbeat": "music/Upbeat.mp3", "Luxury": "music/Luxury.mp3", "Motivation": "music/Motivation.mp3"}
 
+VOICE_MAP = {
+    "Deep/Luxury": "en-US-EricNeural",
+    "Friendly/Fast": "en-US-GuyNeural",
+    "Professional/Clean": "en-US-AndrewNeural",
+    "Female/Warm": "en-US-AvaNeural"
+}
+
 # --- HELPER FUNCTIONS ---
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip('#')
@@ -327,6 +334,9 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
     if vo_clip: final = final.with_audio(vo_clip)
     return final
 
+# --- VOICE MAPPING ---
+# These are the high-quality neural voices from edge-tts
+
 async def render_cinematic_video(job_id, req, output_path, base_dir):
     clips, final = [], None
     req_dict = req if isinstance(req, dict) else req.model_dump()
@@ -334,18 +344,26 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
     logo_file_path = None
 
     try:
+        # Handle Logo
         if req_dict.get('logo_data') and ',' in req_dict.get('logo_data'):
             logo_data = base64.b64decode(req_dict.get('logo_data').split(',', 1)[1])
             logo_file_path = os.path.join(base_dir, f"temp_logo_{job_id}.png")
             Image.open(io.BytesIO(logo_data)).save(logo_file_path)
 
+        # Handle Orientation
         tw, th = (720, 1280) if "Vertical" in req_dict.get('format', 'Vertical') else (1280, 720)
 
+        # Voice Selection Logic
+        requested_voice = req_dict.get('voice', 'Professional/Clean')
+        # Fallback to AndrewNeural if the key provided doesn't match our map
+        voice_id = VOICE_MAP.get(requested_voice, "en-US-AndrewNeural")
+
+        # Generate Audio for all scenes
         vo_tasks, vo_map = [], {}
         for s in scenes:
             if s.get('enable_vo') and s.get('caption'):
                 p = os.path.join(base_dir, f"temp_vo_{job_id}_{s['id']}.mp3")
-                vo_tasks.append(generate_edge_audio_async(s['caption'], req_dict.get('voice','en-US-ChristopherNeural'), p))
+                vo_tasks.append(generate_edge_audio_async(s['caption'], voice_id, p))
                 vo_map[s['id']] = {"path": p}
         
         if vo_tasks:
@@ -353,32 +371,58 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
             for sid, res in zip(vo_map.keys(), results):
                 vo_map[sid]["timings"] = res
 
+        # Build Video Clips
         for i, scene in enumerate(scenes):
             clips.append(create_animated_clip(
                 job_id, i, scene, tw, th, (i==0), meta.get('address',''), meta.get('price',''), 
                 meta.get('beds',''), meta.get('baths',''), meta.get('sqft',''), req_dict.get('language','English'),
                 req_dict.get('font','Montserrat'), req_dict.get('show_price', True), req_dict.get('show_details', True), 
-                req_dict.get('voice','en-US-ChristopherNeural'), req_dict.get('status_choice','Just Listed'), 
+                voice_id, req_dict.get('status_choice','Just Listed'), 
                 meta.get('agent',''), meta.get('brokerage',''), meta.get('phone',''), meta.get('mls_source',''), 
                 meta.get('mls_number',''), 3.0, 'Auto', req_dict.get('primary_color','#552448'), logo_file_path, base_dir,
                 vo_data=vo_map.get(scene['id'])
             ))
 
-        clips.append(create_end_screen(job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), meta.get('phone',''), meta.get('website',''), 5.0, req_dict.get('language','English'), meta.get('mls_source',''), meta.get('mls_number',''), req_dict.get('font','Montserrat'), req_dict.get('primary_color','#552448'), base_dir))
+        # Add End Screen
+        clips.append(create_end_screen(
+            job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), 
+            meta.get('phone',''), meta.get('website',''), 5.0, req_dict.get('language','English'), 
+            meta.get('mls_source',''), meta.get('mls_number',''), req_dict.get('font','Montserrat'), 
+            req_dict.get('primary_color','#552448'), base_dir
+        ))
 
+        # Concatenate and Mix Audio
         final = concatenate_videoclips(clips)
         m_choice = req_dict.get('music')
         if m_choice and m_choice != "none" and m_choice in MUSIC_MAP:
             m_file = os.path.join(base_dir, MUSIC_MAP[m_choice])
             if os.path.exists(m_file):
                 bg = AudioFileClip(m_file)
-                if bg.duration < final.duration: bg = concatenate_audioclips([bg] * (int(final.duration / bg.duration) + 1))
+                if bg.duration < final.duration: 
+                    bg = concatenate_audioclips([bg] * (int(final.duration / bg.duration) + 1))
                 bg = bg.with_duration(final.duration).with_volume_scaled(0.08)
-                final.audio = CompositeAudioClip([bg, final.audio]) if final.audio else bg
+                
+                # Combine background music with voiceovers
+                if final.audio:
+                    final.audio = CompositeAudioClip([bg, final.audio])
+                else:
+                    final.audio = bg
 
-        final.write_videofile(output_path, fps=24, codec="libx264", audio_codec="aac", threads=4, preset="ultrafast", logger=None, ffmpeg_params=["-movflags", "faststart"])
+        # Write final file
+        final.write_videofile(
+            output_path, 
+            fps=24, 
+            codec="libx264", 
+            audio_codec="aac", 
+            threads=4, 
+            preset="ultrafast", 
+            logger=None, 
+            ffmpeg_params=["-movflags", "faststart"]
+        )
         return True
+
     finally:
+        # Cleanup Resources
         for c in clips: 
             try: c.close()
             except: pass
@@ -388,7 +432,6 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
         for tf in glob.glob(os.path.join(base_dir, f"temp_*{job_id}*")):
             try: os.remove(tf)
             except: pass
-
 # # --- QUICK IMAGE TEST RUNNER ---
 # if __name__ == "__main__":
 #     print("Starting quick image test...")

@@ -9,7 +9,8 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 
 from engine import render_cinematic_video
-from scraper import fetch_zillow_data, analyze_image_with_gemini, generate_fb_post_content
+# NEW VERSION
+from scraper import fetch_zillow_data, analyze_scenes_batch, generate_fb_post_content
 
 app = FastAPI(title="Cinematic Listing AI Backend")
 
@@ -76,26 +77,60 @@ def background_render_task(job_id: str, req: RenderRequest):
 @app.post("/api/fetch-zillow")
 async def fetch_zillow(req: FetchRequest):
     if supabase and req.user_id:
+        # Check credits
         user_data = supabase.table("user_credits").select("balance").eq("user_id", req.user_id).single().execute()
-        if user_data.data and user_data.data.get("credits", 0) < 1: raise HTTPException(status_code=402, detail="Insufficient credits.")
+        if user_data.data and user_data.data.get("credits", 0) < 1: 
+            raise HTTPException(status_code=402, detail="Insufficient credits.")
+    
     try:
+        # 1. Fetch data and images
         meta_data, downloaded_images = fetch_zillow_data(req.zillowUrl)
         downloaded_images = list(dict.fromkeys(downloaded_images))
-        fb_draft, scenes, base_url = generate_fb_post_content(meta_data, req.language), [], get_base_url()
-        for img_path in downloaded_images:
-            analysis = analyze_image_with_gemini(img_path, req.language, meta_data.get('description', ''))
+        
+        # 2. Generate content (FB Post and the Batch Video Script)
+        fb_draft = generate_fb_post_content(meta_data, req.language)
+        base_url = get_base_url()
+        
+        # --- NEW ENHANCEMENT: Call Gemini ONCE for all images ---
+        batch_analysis = analyze_scenes_batch(downloaded_images, req.language, meta_data)
+        # --------------------------------------------------------
+
+        scenes = []
+        for i, img_path in enumerate(downloaded_images):
+            # Find the specific script for this image index from the batch result
+            analysis = next((item for item in batch_analysis if item.get("image_index") == i), {})
+            
             original_filename = os.path.basename(img_path)
             unique_filename = f"{uuid.uuid4().hex[:8]}_{original_filename}"
             public_url = f"{base_url}/raw_photos/{original_filename}"
+            
             if supabase:
                 try:
                     with open(img_path, "rb") as f:
-                        supabase.storage.from_("listings").upload(path=unique_filename, file=f.read(), file_options={"content-type": "image/jpeg"})
+                        supabase.storage.from_("listings").upload(
+                            path=unique_filename, 
+                            file=f.read(), 
+                            file_options={"content-type": "image/jpeg"}
+                        )
                     public_url = supabase.storage.from_("listings").get_public_url(unique_filename)
-                except Exception as e: print(f"Supabase photo upload failed: {e}")
-            scenes.append({"id": str(uuid.uuid4()), "image_path": img_path, "image_url": public_url, "room_type": analysis.get("room_type", "Room"), "caption": analysis.get("caption", "Beautiful Home"), "effect": analysis.get("effect", "zoom_in"), "enable_vo": True})
+                except Exception as e: 
+                    print(f"Supabase photo upload failed: {e}")
+
+            # 3. Build the scene using the batch-aware analysis
+            scenes.append({
+                "id": str(uuid.uuid4()), 
+                "image_path": img_path, 
+                "image_url": public_url, 
+                "room_type": analysis.get("room_type", "Room"), 
+                "caption": analysis.get("caption", "Explore this beautiful property."), 
+                "effect": analysis.get("effect", "zoom_in"), 
+                "enable_vo": True
+            })
+
         return {"meta": meta_data, "fbDraft": fb_draft, "scenes": scenes}
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+        
+    except Exception as e: 
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/render-video")
 async def start_render(req: RenderRequest, background_tasks: BackgroundTasks):
