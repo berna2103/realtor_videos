@@ -25,6 +25,7 @@ import {
   Globe,
   Phone,
   RefreshCw,
+  LayoutDashboard
 } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
@@ -273,7 +274,7 @@ const SidebarSettings = ({
             onChange={(e) => setFont(e.target.value)}
             className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-900 font-medium outline-none"
           >
-            <option value="Montserrat">Montserrat</option>
+            <option value="Inter">Inter</option>
             <option value="Roboto">Roboto</option>
             <option value="Cinzel">Cinzel</option>
             <option value="Playfair">Playfair Display</option>
@@ -679,39 +680,52 @@ export default function CinematicListingApp() {
       )}
 
       {/* --- TOP NAVIGATION --- */}
-      <nav className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur-xl flex items-center justify-between px-8 z-30 relative">
-        <div className="flex items-center gap-3">
-          <div className="bg-slate-900 p-2 rounded-xl shadow-lg shadow-slate-200">
+      <nav className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur-xl flex items-center justify-between px-4 sm:px-8 z-30 relative">
+        
+        {/* Logo Area */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="bg-slate-900 p-1.5 sm:p-2 rounded-xl shadow-lg shadow-slate-200">
             <Video className="w-5 h-5 text-white" />
           </div>
-          <h1 className="font-serif text-2xl font-bold text-slate-900 tracking-tight">
+          <h1 className="font-serif text-xl sm:text-2xl font-bold text-slate-900 tracking-tight hidden min-[380px]:block">
             Cinematic
             <span className="text-blue-600 font-sans font-medium">AI</span>
           </h1>
         </div>
-        <div className="flex items-center gap-6">
+
+        {/* Right Side Actions */}
+        <div className="flex items-center gap-2 sm:gap-6">
           {user && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 border border-slate-200 rounded-full">
+            <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-slate-50 border border-slate-200 rounded-full shrink-0">
               <Coins className="w-4 h-4 text-blue-600" />
               <span className="text-sm font-bold text-slate-700">
-                {credits} Credits
+                {credits}<span className="hidden sm:inline"> Credits</span>
               </span>
               <button
                 onClick={() => setShowTopUpModal(true)}
-                className="ml-2 text-[11px] bg-blue-600 text-white px-3 py-1 rounded-full font-bold hover:bg-blue-700 transition-colors"
+                className="ml-1 sm:ml-2 text-[10px] sm:text-[11px] bg-blue-600 text-white px-2.5 sm:px-3 py-1 rounded-full font-bold hover:bg-blue-700 transition-colors"
               >
                 Buy
               </button>
             </div>
           )}
+          
           {user ? (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1 sm:gap-4 shrink-0">
+              <Link
+                href="/dashboard"
+                className="lg:hidden p-1.5 sm:p-2 text-slate-400 hover:text-blue-600 transition-colors"
+              >
+                <LayoutDashboard className="w-5 h-5" />
+              </Link>
+
               <span className="text-sm text-slate-500 hidden md:block font-medium">
                 {userEmail}
               </span>
+              
               <button
                 onClick={signOut}
-                className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-red-500 transition-colors"
               >
                 <LogOut className="w-5 h-5" />
               </button>
@@ -719,9 +733,9 @@ export default function CinematicListingApp() {
           ) : (
             <button
               onClick={() => setShowAuthModal(true)}
-              className="text-sm font-bold text-blue-600 hover:text-blue-700 px-6 py-2.5 rounded-full border border-blue-100 bg-blue-50/50 transition-all"
+              className="text-xs sm:text-sm font-bold text-blue-600 hover:text-blue-700 px-4 sm:px-6 py-2 sm:py-2.5 rounded-full border border-blue-100 bg-blue-50/50 transition-all shrink-0"
             >
-              Agent Sign In
+              Sign In
             </button>
           )}
         </div>

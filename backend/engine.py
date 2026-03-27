@@ -472,8 +472,13 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
 
         # Final Render
         final.write_videofile(
-            output_path, fps=24, codec="libx264", audio_codec="aac", 
-            threads=4, preset="ultrafast", logger=None, 
+            output_path, 
+            fps=24, 
+            codec="libx264", 
+            audio_codec="aac", 
+            threads=4, 
+            preset="medium", 
+            logger=None, 
             ffmpeg_params=["-movflags", "faststart"]
         )
         return True

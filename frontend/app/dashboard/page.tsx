@@ -13,6 +13,7 @@ import {
   Trash2,
   Clock,
   Plus,
+  LayoutDashboard,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -205,11 +206,15 @@ export default function MyVideosDashboard() {
                   </div>
                   <div className="flex gap-3 mt-auto pt-4 border-t border-slate-100">
                     <button onClick={() => handleDownload(video.video_url, video.property_address)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-900 text-xs font-black uppercase tracking-widest py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95">
-                      <Download className="w-3.5 h-3.5" /> MP4
+                      <Download className="w-3.5 h-3.5" /> Download
                     </button>
                     <button onClick={() => handleShare(video.video_url)} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-black uppercase tracking-widest py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95">
                       <Share2 className="w-3.5 h-3.5" /> Share
                     </button>
+                    {/* New Dashboard Button */}
+                    <a href="/dashboard" className="flex-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-black uppercase tracking-widest py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95">
+                      <LayoutDashboard className="w-3.5 h-3.5" /> View
+                    </a>
                   </div>
                 </div>
               </div>

@@ -49,9 +49,9 @@ export async function POST(req: Request) {
 
       // Determine how many credits to give based on the amount paid
       let creditsToAdd = 0;
-      if (amountPaid === 1500) {
+      if (amountPaid === 2500) {
         creditsToAdd = 5;
-      } else if (amountPaid === 2500) {
+      } else if (amountPaid === 5000) {
         creditsToAdd = 10;
       } else {
         // Fallback: If you are testing a different price, give 1 credit so it doesn't fail silently
