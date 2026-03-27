@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from supabase import create_client, Client
+import traceback
 
 from engine import render_cinematic_video
 # NEW VERSION
@@ -42,10 +43,26 @@ class MetaDef(BaseModel):
     address: str; price: str; beds: str; baths: str; sqft: str; agent: str; brokerage: str; phone: str = ""; website: str = ""; mls_source: str; mls_number: str
 
 class SceneDef(BaseModel):
-    id: str; image_path: str; room_type: str; caption: str; effect: str; enable_vo: bool
+    id: str
+    image_path: str
+    room_type: str
+    caption: str
+    effect: str  # This now receives 'pan_left', 'pan_right', etc.
+    enable_vo: bool
+    image_url: Optional[str] = None
+
 
 class RenderRequest(BaseModel):
-    user_id: Optional[str] = None; meta: Optional[MetaDef] = None; scenes: Optional[List[SceneDef]] = None; format: Optional[str] = "Vertical (1080x1920)"; language: Optional[str] = "English"; voice: Optional[str] = "en-US-ChristopherNeural"; font: Optional[str] = "Montserrat"; music: Optional[str] = "none"; timing_mode: str = "Auto"; show_price: bool = True; show_details: bool = True; status_choice: str = "Just Listed"; primary_color: str = "#552448"; logo_data: Optional[str] = None
+    user_id: Optional[str] = None
+    meta: Optional[MetaDef] = None
+    scenes: Optional[List[SceneDef]] = None
+    format: Optional[str] = "Vertical (1080x1920)"
+    language: Optional[str] = "English"
+    voice: Optional[str] = "Professional/Clean"
+    font: Optional[str] = "Montserrat"
+    music: Optional[str] = "none"
+    primary_color: str = "#552448"
+    logo_data: Optional[str] = None
 
 def background_render_task(job_id: str, req: RenderRequest):
     """ENHANCEMENT: Handles the new async render function."""
@@ -72,6 +89,8 @@ def background_render_task(job_id: str, req: RenderRequest):
 
             jobs[job_id].update({"status": "completed", "progress": 100, "video_url": final_video_url})
     except Exception as e:
+        print(f"\n--- FATAL ERROR RENDERING JOB {job_id} ---")
+        traceback.print_exc()  # <--- This will print the actual error to your terminal!
         jobs[job_id].update({"status": "failed", "error": str(e)})
 
 @app.post("/api/fetch-zillow")

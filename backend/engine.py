@@ -14,13 +14,12 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from moviepy import (
     ImageClip, 
+    VideoClip,
     CompositeVideoClip, 
     concatenate_videoclips, 
     AudioFileClip, 
     CompositeAudioClip,
     concatenate_audioclips, 
-    vfx, 
-    afx
 )
 
 # Fix for MoviePy 1.0.3 & Pillow 10+
@@ -34,12 +33,20 @@ SQFT_PATHS = [[(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8), (0.2, 0.2)]]
 
 MUSIC_MAP = {"Upbeat": "music/Upbeat.mp3", "Luxury": "music/Luxury.mp3", "Motivation": "music/Motivation.mp3"}
 
-VOICE_MAP = {
-    "Deep/Luxury": "en-US-EricNeural",
-    "Friendly/Fast": "en-US-GuyNeural",
-    "Professional/Clean": "en-US-AndrewNeural",
-    "Female/Warm": "en-US-AvaNeural"
-}
+# VOICE_MAP = {
+#     # English Voices
+#     "Deep/Luxury": "en-US-EricNeural",
+#     "Friendly/Fast": "en-US-GuyNeural",
+#     "Professional/Clean": "en-US-AndrewNeural",
+#     "Female/Warm": "en-US-AvaNeural",
+    
+#     # Spanish Voices
+#     "Spanish/Mexico-Male": "es-MX-JorgeNeural",
+#     "Spanish/Mexico-Female": "es-MX-DaliaNeural",
+#     "Spanish/Spain-Male": "es-ES-AlvaroNeural",
+#     "Spanish/Spain-Female": "es-ES-ElviraNeural",
+#     "Spanish/US-Male": "es-US-AlonsoNeural"
+# }
 
 # --- HELPER FUNCTIONS ---
 def hex_to_rgb(hex_color):
@@ -299,43 +306,79 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
         except: pass
 
     img_path = scene_data['image_path']
-    if not os.path.exists(img_path) and scene_data.get('image_url', '').startswith('http'):
-        r = requests.get(scene_data['image_url'])
-        if r.status_code == 200:
-            os.makedirs(os.path.dirname(img_path), exist_ok=True)
-            with open(img_path, 'wb') as f: f.write(r.content)
+    img_url = scene_data.get('image_url', '') # Safely get the URL
+
+    if not os.path.exists(img_path) and img_url.startswith('http'):
+        try:
+            r = requests.get(img_url, timeout=15)
+            if r.status_code == 200:
+                os.makedirs(os.path.dirname(img_path), exist_ok=True)
+                with open(img_path, 'wb') as f: 
+                    f.write(r.content)
+        except requests.RequestException as e:
+            print(f"Warning: Failed to fetch image {img_url} - {e}")
+
+    # Effect Configuration
+    effect = scene_data.get('effect', 'zoom_in')
+    scale_factor = 1.3  # 30% buffer for panning
 
     clip = ImageClip(img_path)
-    tr, cr = tw / th, clip.w / clip.h
-    if cr > tr:
-        clip = clip.resized(height=th)
-        clip = clip.cropped(x1=clip.w/2 - tw/2, y1=0, x2=clip.w/2 + tw/2, y2=th)
-    else:
-        clip = clip.resized(width=tw)
-        clip = clip.cropped(x1=0, y1=clip.h/2 - th/2, x2=tw, y2=clip.h/2 + th/2)
     
-    layers = [clip.resized(lambda t: 1.0 + 0.15 * ease_in_out(t, dur)).with_duration(dur)]
+    # Resize image to be larger than the frame to allow panning
+    img_aspect = clip.w / clip.h
+    video_aspect = tw / th
+    if img_aspect > video_aspect:
+        clip = clip.resized(height=th * scale_factor)
+    else:
+        clip = clip.resized(width=tw * scale_factor)
+    
+    # Pre-fetch the base frame as a numpy array (Massive memory saver)
+    base_frame = clip.get_frame(0)
+    h_base, w_base, _ = base_frame.shape
+
+    # Notice we removed 'get_frame' from the arguments, it only needs 't'
+    def make_frame(t):
+        progress = ease_in_out(t, dur)
+
+        if effect == "pan_right":
+            x = int((w_base - tw) * progress)
+            y = int((h_base - th) / 2)
+            return base_frame[y:y+th, x:x+tw]
+        elif effect == "pan_left":
+            x = int((w_base - tw) * (1 - progress))
+            y = int((h_base - th) / 2)
+            return base_frame[y:y+th, x:x+tw]
+        elif effect == "pan_up":
+            x = int((w_base - tw) / 2)
+            y = int((h_base - th) * (1 - progress))
+            return base_frame[y:y+th, x:x+tw]
+        elif effect == "pan_down":
+            x = int((w_base - tw) / 2)
+            y = int((h_base - th) * progress)
+            return base_frame[y:y+th, x:x+tw]
+        else: # Default Zoom
+            zoom = 1.0 + (0.15 * progress)
+            new_w, new_h = int(tw / zoom), int(th / zoom)
+            x = int((w_base - new_w) / 2)
+            y = int((h_base - new_h) / 2)
+            cropped = base_frame[y:y+new_h, x:x+new_w]
+            # Fast resize using Pillow, back to numpy
+            pil_img = Image.fromarray(cropped).resize((tw, th), Image.Resampling.LANCZOS)
+            return np.array(pil_img)
+
+    # Completely bypass .fl() and instantiate a fresh VideoClip
+    animated_base = VideoClip(make_frame, duration=dur)
+    layers = [animated_base]
+
+    # Add overlays (Preserve your existing Title/Caption logic)
     if is_first:
         layers.extend(create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status_choice, agent_name, brokerage, phone, mls_source, mls_number, theme_color, base_dir))
     else:
         layers.extend(create_glass_caption(job_id, scene_data['caption'], dur, tw, th, font_choice, base_dir, vo_timings, theme_color))
         
-    if logo_path and os.path.exists(logo_path):
-        logo_canvas = Image.new('RGBA', (tw, th), (0, 0, 0, 0))
-        logo_img = Image.open(logo_path).convert("RGBA")
-        lw = int(tw * 0.16)
-        logo_img.thumbnail((lw, lw), Image.Resampling.LANCZOS)
-        logo_canvas.paste(logo_img, (40, 40), mask=logo_img)
-        temp_l = os.path.join(base_dir, f"temp_logo_overlay_{job_id}_{i}.png")
-        logo_canvas.save(temp_l)
-        layers.append(ImageClip(temp_l).with_duration(dur))
-
     final = CompositeVideoClip(layers, size=(tw, th)).with_duration(dur)
     if vo_clip: final = final.with_audio(vo_clip)
     return final
-
-# --- VOICE MAPPING ---
-# These are the high-quality neural voices from edge-tts
 
 async def render_cinematic_video(job_id, req, output_path, base_dir):
     clips, final = [], None
@@ -343,22 +386,39 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
     meta, scenes = req_dict.get('meta', {}), req_dict.get('scenes', [])
     logo_file_path = None
 
+    # Expanded Voice Map with Spanish Options
+    VOICE_MAP = {
+        "Deep/Luxury": "en-US-EricNeural",
+        "Friendly/Fast": "en-US-GuyNeural",
+        "Professional/Clean": "en-US-AndrewNeural",
+        "Female/Warm": "en-US-AvaNeural",
+        "Spanish/Mexico-Male": "es-MX-JorgeNeural",
+        "Spanish/Mexico-Female": "es-MX-DaliaNeural",
+        "Spanish/Spain-Male": "es-ES-AlvaroNeural",
+        "Spanish/US-Male": "es-US-AlonsoNeural"
+    }
+
     try:
-        # Handle Logo
+        # Handle Logo processing
         if req_dict.get('logo_data') and ',' in req_dict.get('logo_data'):
             logo_data = base64.b64decode(req_dict.get('logo_data').split(',', 1)[1])
             logo_file_path = os.path.join(base_dir, f"temp_logo_{job_id}.png")
             Image.open(io.BytesIO(logo_data)).save(logo_file_path)
 
-        # Handle Orientation
+        # Set Resolution based on format
         tw, th = (720, 1280) if "Vertical" in req_dict.get('format', 'Vertical') else (1280, 720)
 
         # Voice Selection Logic
         requested_voice = req_dict.get('voice', 'Professional/Clean')
-        # Fallback to AndrewNeural if the key provided doesn't match our map
-        voice_id = VOICE_MAP.get(requested_voice, "en-US-AndrewNeural")
+        lang = req_dict.get('language', 'English')
+        
+        # Auto-fallback: If language is Spanish but an English voice is selected, use Jorge
+        if lang == "Spanish" and "en-US" in VOICE_MAP.get(requested_voice, "en-US"):
+            voice_id = "es-MX-JorgeNeural"
+        else:
+            voice_id = VOICE_MAP.get(requested_voice, "en-US-AndrewNeural")
 
-        # Generate Audio for all scenes
+        # Generate Audio for all enabled scenes
         vo_tasks, vo_map = [], {}
         for s in scenes:
             if s.get('enable_vo') and s.get('caption'):
@@ -371,24 +431,27 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
             for sid, res in zip(vo_map.keys(), results):
                 vo_map[sid]["timings"] = res
 
-        # Build Video Clips
+        # Build Video Clips using the new animated logic
         for i, scene in enumerate(scenes):
             clips.append(create_animated_clip(
-                job_id, i, scene, tw, th, (i==0), meta.get('address',''), meta.get('price',''), 
-                meta.get('beds',''), meta.get('baths',''), meta.get('sqft',''), req_dict.get('language','English'),
-                req_dict.get('font','Montserrat'), req_dict.get('show_price', True), req_dict.get('show_details', True), 
+                job_id, i, scene, tw, th, (i==0), 
+                meta.get('address',''), meta.get('price',''), 
+                meta.get('beds',''), meta.get('baths',''), meta.get('sqft',''), 
+                lang, req_dict.get('font','Montserrat'), 
+                req_dict.get('show_price', True), req_dict.get('show_details', True), 
                 voice_id, req_dict.get('status_choice','Just Listed'), 
-                meta.get('agent',''), meta.get('brokerage',''), meta.get('phone',''), meta.get('mls_source',''), 
-                meta.get('mls_number',''), 3.0, 'Auto', req_dict.get('primary_color','#552448'), logo_file_path, base_dir,
-                vo_data=vo_map.get(scene['id'])
+                meta.get('agent',''), meta.get('brokerage',''), meta.get('phone',''), 
+                meta.get('mls_source',''), meta.get('mls_number',''), 
+                3.5, 'Auto', req_dict.get('primary_color','#552448'), 
+                logo_file_path, base_dir, vo_data=vo_map.get(scene['id'])
             ))
 
-        # Add End Screen
+        # Add the End Screen
         clips.append(create_end_screen(
             job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), 
-            meta.get('phone',''), meta.get('website',''), 5.0, req_dict.get('language','English'), 
-            meta.get('mls_source',''), meta.get('mls_number',''), req_dict.get('font','Montserrat'), 
-            req_dict.get('primary_color','#552448'), base_dir
+            meta.get('phone',''), meta.get('website',''), 5.0, lang, 
+            meta.get('mls_source',''), meta.get('mls_number',''), 
+            req_dict.get('font','Montserrat'), req_dict.get('primary_color','#552448'), base_dir
         ))
 
         # Concatenate and Mix Audio
@@ -402,27 +465,21 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
                     bg = concatenate_audioclips([bg] * (int(final.duration / bg.duration) + 1))
                 bg = bg.with_duration(final.duration).with_volume_scaled(0.08)
                 
-                # Combine background music with voiceovers
                 if final.audio:
                     final.audio = CompositeAudioClip([bg, final.audio])
                 else:
                     final.audio = bg
 
-        # Write final file
+        # Final Render
         final.write_videofile(
-            output_path, 
-            fps=24, 
-            codec="libx264", 
-            audio_codec="aac", 
-            threads=4, 
-            preset="ultrafast", 
-            logger=None, 
+            output_path, fps=24, codec="libx264", audio_codec="aac", 
+            threads=4, preset="ultrafast", logger=None, 
             ffmpeg_params=["-movflags", "faststart"]
         )
         return True
 
     finally:
-        # Cleanup Resources
+        # Cleanup temp files
         for c in clips: 
             try: c.close()
             except: pass
@@ -432,7 +489,8 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
         for tf in glob.glob(os.path.join(base_dir, f"temp_*{job_id}*")):
             try: os.remove(tf)
             except: pass
-# # --- QUICK IMAGE TEST RUNNER ---
+
+
 # if __name__ == "__main__":
 #     print("Starting quick image test...")
     

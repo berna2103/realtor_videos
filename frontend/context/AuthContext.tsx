@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 
@@ -20,18 +20,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [credits, setCredits] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchCredits = async (userId: string) => {
+  // 1. Define functions first and wrap in useCallback to prevent infinite re-renders
+  const fetchCredits = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from("user_credits")
       .select("balance")
       .eq("user_id", userId)
       .maybeSingle();
     setCredits(data ? data.balance : 0);
-  };
+  }, []);
 
-  const refreshCredits = async () => {
+  const refreshCredits = useCallback(async () => {
     if (user) await fetchCredits(user.id);
-  };
+  }, [user, fetchCredits]);
 
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -39,8 +40,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setCredits(null);
   };
 
+  // 2. Initial Session Check & Auth Listener
   useEffect(() => {
-    // Initial Session Check
     const initSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
@@ -52,7 +53,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initSession();
 
-    // Listen for changes (Login/Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         setUser(session.user);
@@ -65,7 +65,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [fetchCredits]);
+
+  // 3. The "Tab Switch" Magic Trick
+  // We ONLY listen for the window focus event here. Initial load is handled above.
+  useEffect(() => {
+    const handleFocus = () => {
+      if (user) {
+        refreshCredits();
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [user, refreshCredits]);
 
   return (
     <AuthContext.Provider value={{ 
