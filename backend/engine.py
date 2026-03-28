@@ -1,16 +1,16 @@
 import os
-import time
 import asyncio
 import hashlib
 import base64
 import glob
 import io
-import threading
 import edge_tts
 import numpy as np
 import requests
+import random
+import math
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 from moviepy import (
     ImageClip, 
@@ -32,21 +32,6 @@ BATH_PATHS = [[(0.1, 0.5), (0.1, 0.8), (0.9, 0.8), (0.9, 0.5), (0.1, 0.5)], [(0.
 SQFT_PATHS = [[(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8), (0.2, 0.2)]]
 
 MUSIC_MAP = {"Upbeat": "music/Upbeat.mp3", "Luxury": "music/Luxury.mp3", "Motivation": "music/Motivation.mp3"}
-
-# VOICE_MAP = {
-#     # English Voices
-#     "Deep/Luxury": "en-US-EricNeural",
-#     "Friendly/Fast": "en-US-GuyNeural",
-#     "Professional/Clean": "en-US-AndrewNeural",
-#     "Female/Warm": "en-US-AvaNeural",
-    
-#     # Spanish Voices
-#     "Spanish/Mexico-Male": "es-MX-JorgeNeural",
-#     "Spanish/Mexico-Female": "es-MX-DaliaNeural",
-#     "Spanish/Spain-Male": "es-ES-AlvaroNeural",
-#     "Spanish/Spain-Female": "es-ES-ElviraNeural",
-#     "Spanish/US-Male": "es-US-AlonsoNeural"
-# }
 
 # --- HELPER FUNCTIONS ---
 def hex_to_rgb(hex_color):
@@ -306,7 +291,7 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
         except: pass
 
     img_path = scene_data['image_path']
-    img_url = scene_data.get('image_url', '') # Safely get the URL
+    img_url = scene_data.get('image_url', '')
 
     if not os.path.exists(img_path) and img_url.startswith('http'):
         try:
@@ -318,25 +303,34 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
         except requests.RequestException as e:
             print(f"Warning: Failed to fetch image {img_url} - {e}")
 
-    # Effect Configuration
-    effect = scene_data.get('effect', 'zoom_in')
-    scale_factor = 1.3  # 30% buffer for panning
-
-    clip = ImageClip(img_path)
+    # Ensure the randomizer includes the new 3D effects
+    all_effects = [
+        "zoom_in", "zoom_out", "pan_right", "pan_left", 
+        "pan_up", "pan_down", "pan_up_left", "pan_down_right",
+        "drone_push", "drone_pull", "luxury_breathe",
+        "3d_pan_right", "3d_pan_left"
+    ]
     
-    # Resize image to be larger than the frame to allow panning
+    effect = scene_data.get('effect')
+    if not effect or effect == "auto":
+        effect = random.choice(all_effects)
+
+    # 1. BULLETPROOF RESIZING TO FIX DARK CORNERS
+    scale_factor = 1.35  
+    
+    clip = ImageClip(img_path)
     img_aspect = clip.w / clip.h
     video_aspect = tw / th
+    
     if img_aspect > video_aspect:
         clip = clip.resized(height=th * scale_factor)
     else:
         clip = clip.resized(width=tw * scale_factor)
-    
-    # Pre-fetch the base frame as a numpy array (Massive memory saver)
+        
     base_frame = clip.get_frame(0)
     h_base, w_base, _ = base_frame.shape
+    base_pil = Image.fromarray(base_frame)
 
-    # Notice we removed 'get_frame' from the arguments, it only needs 't'
     def make_frame(t):
         progress = ease_in_out(t, dur)
 
@@ -356,13 +350,92 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
             x = int((w_base - tw) / 2)
             y = int((h_base - th) * progress)
             return base_frame[y:y+th, x:x+tw]
-        else: # Default Zoom
+        elif effect == "pan_up_left":
+            x = int((w_base - tw) * (1 - progress))
+            y = int((h_base - th) * (1 - progress))
+            return base_frame[y:y+th, x:x+tw]
+        elif effect == "pan_down_right":
+            x = int((w_base - tw) * progress)
+            y = int((h_base - th) * progress)
+            return base_frame[y:y+th, x:x+tw]
+        
+        # --- NEW TRUE 3D PERSPECTIVE PANS ---
+        elif effect == "3d_pan_right":
+            x_offset = (w_base - tw) * progress
+            y_offset = (h_base - th) / 2
+            tilt = int(th * 0.08)
+            
+            left_tilt = tilt * progress
+            x0, y0 = x_offset, y_offset - left_tilt
+            x1, y1 = x_offset, y_offset + th + left_tilt
+            
+            right_tilt = tilt * (1 - progress)
+            x2, y2 = x_offset + tw, y_offset + th + right_tilt
+            x3, y3 = x_offset + tw, y_offset - right_tilt
+            
+            quad = (x0, y0, x1, y1, x2, y2, x3, y3)
+            return np.array(base_pil.transform((tw, th), Image.QUAD, quad, resample=Image.Resampling.BICUBIC))
+            
+        elif effect == "3d_pan_left":
+            x_offset = (w_base - tw) * (1 - progress)
+            y_offset = (h_base - th) / 2
+            tilt = int(th * 0.08)
+            
+            left_tilt = tilt * (1 - progress)
+            x0, y0 = x_offset, y_offset - left_tilt
+            x1, y1 = x_offset, y_offset + th + left_tilt
+            
+            right_tilt = tilt * progress
+            x2, y2 = x_offset + tw, y_offset + th + right_tilt
+            x3, y3 = x_offset + tw, y_offset - right_tilt
+            
+            quad = (x0, y0, x1, y1, x2, y2, x3, y3)
+            return np.array(base_pil.transform((tw, th), Image.QUAD, quad, resample=Image.Resampling.BICUBIC))
+
+        # --- ZOOM & DRONE EFFECTS ---
+        elif effect == "zoom_out":
+            zoom = 1.15 - (0.15 * progress)
+            new_w, new_h = int(tw / zoom), int(th / zoom)
+            x = int((w_base - new_w) / 2)
+            y = int((h_base - new_h) / 2)
+            cropped = base_frame[y:y+new_h, x:x+new_w]
+            pil_img = Image.fromarray(cropped).resize((tw, th), Image.Resampling.LANCZOS)
+            return np.array(pil_img)
+        elif effect == "drone_push":
+            angle = -1.5 + (3.0 * progress)
+            zoom = 1.05 + (0.10 * progress) 
+            new_w, new_h = int(tw / zoom), int(th / zoom)
+            x = int((w_base - new_w) / 2)
+            y = int((h_base - new_h) / 2)
+            cropped = base_frame[y:y+new_h, x:x+new_w]
+            pil_img = Image.fromarray(cropped)
+            rotated = pil_img.rotate(angle, resample=Image.Resampling.BICUBIC)
+            return np.array(rotated.resize((tw, th), Image.Resampling.LANCZOS))
+        elif effect == "drone_pull":
+            angle = 1.5 - (3.0 * progress)
+            zoom = 1.15 - (0.10 * progress) 
+            new_w, new_h = int(tw / zoom), int(th / zoom)
+            x = int((w_base - new_w) / 2)
+            y = int((h_base - new_h) / 2)
+            cropped = base_frame[y:y+new_h, x:x+new_w]
+            pil_img = Image.fromarray(cropped)
+            rotated = pil_img.rotate(angle, resample=Image.Resampling.BICUBIC)
+            return np.array(rotated.resize((tw, th), Image.Resampling.LANCZOS))
+        elif effect == "luxury_breathe":
+            breathe_progress = math.sin(progress * (math.pi / 2)) 
+            zoom = 1.0 + (0.12 * breathe_progress)
+            new_w, new_h = int(tw / zoom), int(th / zoom)
+            x = int((w_base - new_w) / 2)
+            y = int((h_base - new_h) / 2)
+            cropped = base_frame[y:y+new_h, x:x+new_w]
+            pil_img = Image.fromarray(cropped).resize((tw, th), Image.Resampling.LANCZOS)
+            return np.array(pil_img)
+        else: # Default Zoom In
             zoom = 1.0 + (0.15 * progress)
             new_w, new_h = int(tw / zoom), int(th / zoom)
             x = int((w_base - new_w) / 2)
             y = int((h_base - new_h) / 2)
             cropped = base_frame[y:y+new_h, x:x+new_w]
-            # Fast resize using Pillow, back to numpy
             pil_img = Image.fromarray(cropped).resize((tw, th), Image.Resampling.LANCZOS)
             return np.array(pil_img)
 
@@ -374,7 +447,8 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
     if is_first:
         layers.extend(create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status_choice, agent_name, brokerage, phone, mls_source, mls_number, theme_color, base_dir))
     else:
-        layers.extend(create_glass_caption(job_id, scene_data['caption'], dur, tw, th, font_choice, base_dir, vo_timings, theme_color))
+        # Added .get() to safely handle missing captions just in case!
+        layers.extend(create_glass_caption(job_id, scene_data.get('caption', ''), dur, tw, th, font_choice, base_dir, vo_timings, theme_color))
         
     final = CompositeVideoClip(layers, size=(tw, th)).with_duration(dur)
     if vo_clip: final = final.with_audio(vo_clip)

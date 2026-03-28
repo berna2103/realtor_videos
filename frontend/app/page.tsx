@@ -47,13 +47,21 @@ const VOICE_OPTIONS = [
   { label: "Español US (Hombre)", value: "Spanish/US-Male" },
 ];
 
-// New Cinematic Panning Effects
 const EFFECT_OPTIONS = [
+  { label: "Auto / Random (Recommended)", value: "auto" },
   { label: "Slow Zoom In", value: "zoom_in" },
+  { label: "Slow Zoom Out", value: "zoom_out" },
   { label: "Pan Left", value: "pan_left" },
   { label: "Pan Right", value: "pan_right" },
   { label: "Pan Up", value: "pan_up" },
   { label: "Pan Down", value: "pan_down" },
+  { label: "Pan Up-Left (Diagonal)", value: "pan_up_left" },
+  { label: "Pan Down-Right (Diagonal)", value: "pan_down_right" },
+  { label: "3D Perspective Pan Right", value: "3d_pan_right" },
+  { label: "3D Perspective Pan Left", value: "3d_pan_left" },
+  { label: "Drone Push (Bank Right)", value: "drone_push" },
+  { label: "Drone Pull (Bank Left)", value: "drone_pull" },
+  { label: "Luxury Breathe (Cinematic Ease)", value: "luxury_breathe" }
 ];
 
 const VOICE_PREVIEWS: Record<string, string> = {
@@ -220,9 +228,9 @@ const SidebarSettings = ({
             onChange={(e) => setFormat(e.target.value)}
             className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-900 font-medium outline-none hover:border-slate-400 transition-colors"
           >
-            <option>Vertical (1080x1920)</option>
-            <option>Landscape (1920x1080)</option>
-            <option>Square (1080x1080)</option>
+            <option>Vertical (Tik Tok, Reels, Shorts)</option>
+            <option>Landscape (YouTube)</option>
+            <option>Square (Facebook or Instagram Posts)</option>
           </select>
         </div>
 
@@ -301,7 +309,7 @@ const SidebarSettings = ({
 
     {user && (
       <div className="pt-8 border-t border-slate-100">
-        <Link
+        <a
           href="/dashboard"
           className="flex items-center justify-between p-4 bg-white hover:bg-slate-50 border border-slate-200 rounded-2xl group transition-all shadow-sm"
         >
@@ -309,7 +317,7 @@ const SidebarSettings = ({
             <Film className="w-5 h-5 text-blue-600" /> My Video Library
           </span>
           <ChevronRight className="w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
-        </Link>
+        </a>
       </div>
     )}
   </div>
