@@ -348,6 +348,8 @@ export default function CinematicListingApp() {
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [fbDraft, setFbDraft] = useState("");
 
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
+
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
@@ -600,13 +602,14 @@ export default function CinematicListingApp() {
   };
 
   const handleStartOver = () => {
-    if (confirm("Clear storyboard and start over?")) {
-      localStorage.removeItem("draft_meta");
-      localStorage.removeItem("draft_scenes");
-      window.location.reload();
-    }
+    setShowClearConfirmModal(true);
   };
 
+  const executeStartOver = () => {
+    localStorage.removeItem("draft_meta");
+    localStorage.removeItem("draft_scenes");
+    window.location.reload();
+  };
   const updateScene = (index: number, field: keyof Scene, value: any) => {
     const newScenes = [...scenes];
     newScenes[index] = { ...newScenes[index], [field]: value };
@@ -1390,6 +1393,37 @@ export default function CinematicListingApp() {
               </div>
               <span className="text-[10px] font-bold">Details</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* --- CLEAR CONFIRMATION MODAL --- */}
+      {showClearConfirmModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 p-8 sm:p-10 rounded-[2.5rem] max-w-sm w-full text-center shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Trash2 className="w-8 h-8 text-red-500" />
+            </div>
+            <h2 className="font-serif text-3xl font-bold text-slate-900 mb-2 tracking-tight">
+              Start Over?
+            </h2>
+            <p className="text-slate-500 text-sm mb-8 leading-relaxed">
+              This will permanently clear your current storyboard, captions, and property details. This action cannot be undone.
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={executeStartOver}
+                className="w-full bg-red-500 hover:bg-red-600 py-4 rounded-xl font-bold text-white transition-all shadow-lg shadow-red-500/20 active:scale-95 flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" /> Yes, Clear Storyboard
+              </button>
+              <button
+                onClick={() => setShowClearConfirmModal(false)}
+                className="w-full bg-slate-50 hover:bg-slate-100 text-slate-600 py-4 rounded-xl font-bold transition-all"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
