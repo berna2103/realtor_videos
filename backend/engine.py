@@ -92,19 +92,31 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
     overlay_img.paste(scrim, (0, 0), mask=scrim)
     
     draw = ImageDraw.Draw(overlay_img)
-    f_status = get_font(font_choice, int(th * 0.080), base_dir)
+    
+    # 1. Base font sizes (Notice f_agent and f_cta are larger now)
+    status_font_size = int(th * 0.080)
+    f_status = get_font(font_choice, status_font_size, base_dir)
     f_price = get_font(font_choice, int(th * 0.050), base_dir)
     f_pill = get_font(font_choice, int(th * 0.022), base_dir)
     f_addr = get_font(font_choice, int(th * 0.024), base_dir)
-    f_agent = get_font(font_choice, int(th * 0.018), base_dir)
-    f_cta = get_font(font_choice, int(th * 0.024), base_dir)
+    f_agent = get_font(font_choice, int(th * 0.028), base_dir) # Increased for emphasis
+    f_cta = get_font(font_choice, int(th * 0.035), base_dir)   # Increased for emphasis
 
     y_status, y_price, y_pill, y_addr, y_agent, y_cta = int(th * 0.20), int(th * 0.32), int(th * 0.62), int(th * 0.74), int(th * 0.85), int(th * 0.91)
 
     if status:
-        bbox = draw.textbbox((0, 0), status.strip(), font=f_status)
+        status_text = status.strip()
+        max_width = int(tw * 0.90) # Limit text to 90% of screen width
+        bbox = draw.textbbox((0, 0), status_text, font=f_status)
+        
+        # 2. Dynamic Font Scaling: Shrink font until it fits within max_width
+        while (bbox[2] - bbox[0]) > max_width and status_font_size > 10:
+            status_font_size -= 2
+            f_status = get_font(font_choice, status_font_size, base_dir)
+            bbox = draw.textbbox((0, 0), status_text, font=f_status)
+
         x_pos = (tw - (bbox[2] - bbox[0])) // 2
-        draw_text_with_shadow(draw, (x_pos, y_status), status.strip(), f_status, color_white)
+        draw_text_with_shadow(draw, (x_pos, y_status), status_text, f_status, color_white)
 
     if show_price and price:
         p_str = f"${int(float(str(price).replace('$', '').replace(',', ''))):,}"
@@ -147,18 +159,34 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
         txt = f"Agent Contact: {phone}"
         bbox = draw.textbbox((0, 0), txt, font=f_agent)
         x_pos = (tw - (bbox[2] - bbox[0])) // 2
-        draw_text_with_shadow(draw, (x_pos, y_agent), txt, f_agent, color_white)
+        # Color changed to solid white for extra pop, shadow kept
+        draw_text_with_shadow(draw, (x_pos, y_agent), txt, f_agent, (255, 255, 255, 255))
 
-    bbox = draw.textbbox((0, 0), "SCHEDULE SHOWING!", font=f_cta)
-    x_pos = (tw - (bbox[2] - bbox[0])) // 2
-    draw_text_with_shadow(draw, (x_pos, y_cta), "SCHEDULE SHOWING!", f_cta, color_white)
+    # 3. Emphasized CTA Button
+    cta_text = "SCHEDULE SHOWING!"
+    bbox = draw.textbbox((0, 0), cta_text, font=f_cta)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    x_pos = (tw - text_w) // 2
+    
+    # Draw a colored background button for the CTA
+    pad_x = int(tw * 0.04)
+    pad_y = int(th * 0.015)
+    btn_color = theme_color if theme_color else (220, 50, 50, 255) # Uses theme_color or falls back to red
+    draw.rounded_rectangle(
+        [x_pos - pad_x, y_cta - pad_y, x_pos + text_w + pad_x, y_cta + text_h + pad_y],
+        radius=int(th * 0.015),
+        fill=btn_color
+    )
+    draw_text_with_shadow(draw, (x_pos, y_cta), cta_text, f_cta, color_white)
 
     temp = os.path.join(base_dir, f"temp_title_{job_id}.png")
     overlay_img.save(temp)
     return [ImageClip(temp).with_duration(dur)]
-
+    
 def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice, base_dir, timings=None, theme_color="#552448"):
     if not text: return []
+    
     rgb_highlight = hex_to_rgb(theme_color) + (255,)
     font = get_font(font_choice, int(target_h * 0.027), base_dir)
     text = str(text).upper().strip()
@@ -199,20 +227,51 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
     hash_id = hashlib.md5(text.encode()).hexdigest()[:8]
     base_temp = os.path.join(base_dir, f"temp_cap_base_{job_id}_{hash_id}.png") 
     bg_overlay.save(base_temp)
-    layers = [ImageClip(base_temp).with_duration(duration)]
     
-    if timings:
-        for w_idx, word_text, x, y in word_positions:
-            if w_idx < len(timings):
-                s, e, _ = timings[w_idx]
-                if s >= duration: continue
-                hl_img = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
-                ImageDraw.Draw(hl_img).text((x, y), word_text, font=font, fill=rgb_highlight)
-                hl_temp = os.path.join(base_dir, f"temp_hl_{job_id}_{hash_id}_{w_idx}.png") 
-                hl_img.save(hl_temp)
-                layers.append(ImageClip(hl_temp).with_start(s).with_duration(min(e + 0.1, duration) - s))
-    return layers
+    # --- 1. BASE CONTAINER POP-IN (Spring Bounce) ---
+    def pop_base(t):
+        if t > 0.5: return (0, 0)
+        p = t / 0.5
+        # Cinematic Back Ease Out (springs up, slightly overshoots, then settles)
+        c1 = 1.70158
+        ease = 1 + (c1 + 1) * ((p - 1) ** 3) + c1 * ((p - 1) ** 2)
+        y_offset = int(80 * (1 - ease))
+        return (0, y_offset)
 
+    # Apply the animation to the base glass layer
+    layers = [ImageClip(base_temp).with_duration(duration).with_position(pop_base)]
+    
+    # --- 2. HIGHLIGHTED WORD POP-IN (Karaoke Slide) ---
+    def word_pop(t):
+        if t > 0.15: return (0, 0)
+        # Quick, energetic slide up into place
+        p = t / 0.15
+        y_offset = int(12 * (1 - p)**2)
+        return (0, y_offset)
+
+    if timings and len(timings) > 0 and len(word_positions) > 0:
+        # Scale TTS timings to string words to fix mismatches with numbers/symbols
+        ratio = len(timings) / len(word_positions)
+        
+        for w_idx, word_text, x, y in word_positions:
+            start_idx = int(w_idx * ratio)
+            end_idx = min(int((w_idx + 1) * ratio - 0.001), len(timings) - 1)
+            
+            s = timings[start_idx][0]
+            e = timings[end_idx][1]
+            
+            if s >= duration: continue
+            
+            hl_img = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
+            ImageDraw.Draw(hl_img).text((x, y), word_text, font=font, fill=rgb_highlight)
+            hl_temp = os.path.join(base_dir, f"temp_hl_{job_id}_{hash_id}_{w_idx}.png") 
+            hl_img.save(hl_temp)
+            
+            # Apply the animation to each individual word as it appears
+            hl_clip = ImageClip(hl_temp).with_start(s).with_duration(min(e + 0.1, duration) - s)
+            layers.append(hl_clip.with_position(word_pop))
+            
+    return layers
 def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, website, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir):
     rgb_theme = hex_to_rgb(theme_color)
     img_bg = Image.new('RGB', (target_w, target_h), (10, 10, 12)) 
@@ -310,9 +369,13 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
         "drone_push", "drone_pull", "luxury_breathe",
         "3d_pan_right", "3d_pan_left"
     ]
+      
+    raw_effect = scene_data.get('effect', 'auto')
     
-    effect = scene_data.get('effect')
-    if not effect or effect == "auto":
+    # Sanitize the string (forces "Auto", "Auto ", or "AUTO" to become "auto")
+    effect = str(raw_effect).strip().lower() if raw_effect else "auto"
+
+    if effect == "auto":
         effect = random.choice(all_effects)
 
     # 1. BULLETPROOF RESIZING TO FIX DARK CORNERS

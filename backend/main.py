@@ -63,6 +63,7 @@ class RenderRequest(BaseModel):
     music: Optional[str] = "none"
     primary_color: str = "#552448"
     logo_data: Optional[str] = None
+    status_choice: Optional[str] = "Home For Sale"
 
 def background_render_task(job_id: str, req: RenderRequest):
     """ENHANCEMENT: Handles the new async render function."""
@@ -105,6 +106,8 @@ async def fetch_zillow(req: FetchRequest):
         # 1. Fetch data and images
         meta_data, downloaded_images = fetch_zillow_data(req.zillowUrl)
         downloaded_images = list(dict.fromkeys(downloaded_images))
+
+        print(f"Fetched metadata: {meta_data}")
         
         # 2. Generate content (FB Post and the Batch Video Script)
         fb_draft = generate_fb_post_content(meta_data, req.language)

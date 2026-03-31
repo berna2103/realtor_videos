@@ -82,7 +82,7 @@ def fetch_zillow_data(url: str):
         except: pass
 
     downloaded_paths = []
-    for i, img_url in enumerate(unique_urls[:15]):
+    for i, img_url in enumerate(unique_urls[:20]):
         try:
             res = requests.get(img_url, timeout=10)
             res.raise_for_status()
@@ -123,6 +123,10 @@ Create a cinematic walkthrough that feels like a buyer experiencing the home in 
 The captions should guide the viewer naturally from space to space, like an in-person showing.
 
 --------------------------------------------------
+LANGUAGE SETTING (CRITICAL):
+- You MUST write all captions in {language}.
+
+--------------------------------------------------
 TRUTH & COMPLIANCE RULES (CRITICAL):
 - ONLY mention features explicitly stated in the MLS description OR clearly visible in images
 - If a feature is not stated AND not clearly visible, DO NOT mention it
@@ -140,24 +144,11 @@ VOICE & TONE (CRITICAL):
 - Use natural second-person phrasing when appropriate (e.g., "step into", "unwind in")
 - Focus on lifestyle, not just features
 
-GOOD EXAMPLES:
-- "Step into the kitchen—cook and gather"
-- "Relax here after a long day"
-- "Enjoy mornings filled with natural light"
-- "Host friends in this open living space"
-
-BAD EXAMPLES:
-- "This home features a kitchen"
-- "Spacious living room with windows"
-- "Beautiful hardwood flooring throughout"
-
 STYLE RULES:
 - Use subtle action verbs: step into, unwind, gather, enjoy, relax, host
 - Avoid robotic or repetitive phrasing
 - Do NOT start consecutive captions with the same word
 - Keep tone natural—not overly poetic or exaggerated
-- If referencing MLS features, blend into lifestyle:
-  Example: "updated kitchen" → "Cook with ease in the updated kitchen"
 
 --------------------------------------------------
 STRUCTURE & FLOW:
@@ -165,15 +156,6 @@ STRUCTURE & FLOW:
   exterior → entry → living → kitchen → bedrooms → bathrooms → basement → outdoor
 - Each caption must connect naturally to the previous one
 - No random jumps between spaces
-
-EMOTIONAL FLOW:
-- Beginning: welcoming (arrival, curb appeal)
-- Middle: connection (living spaces, kitchen, gathering)
-- End: relaxation (bedrooms, backyard, comfort)
-
-FEATURE PRIORITY:
-- Prioritize features explicitly mentioned in MLS description
-- Use images to support flow and context, not to invent details
 
 --------------------------------------------------
 VISUAL DIRECTION:
@@ -197,13 +179,6 @@ Each object must include:
 - "room_type": string
 - "caption": string (max 14 words)
 - "effect": string
-
---------------------------------------------------
-FINAL CHECK (MANDATORY BEFORE OUTPUT):
-- Remove any feature not supported by MLS description or image
-- Ensure captions feel natural and human (not robotic)
-- Ensure compliance with Fair Housing and advertising standards
-- Ensure smooth narrative flow from first to last caption
 """
 
     try:
@@ -224,14 +199,92 @@ FINAL CHECK (MANDATORY BEFORE OUTPUT):
 
 def generate_fb_post_content(meta, language="English"):
     client = genai.Client(api_key=API_KEY)
+    
+    # Dynamically pull contact info from meta to avoid hardcoding
+    phone = meta.get('phone', 'Contact for details')
+    agent = meta.get('agent', '')
+    brokerage = meta.get('brokerage', '')
+    mls_info = f"{meta.get('mls_source', '')} MLS#: {meta.get('mls_number', '')}"
+
     prompt = f"""
     Generate a compelling Facebook post for this property in {language}.
     Address: {meta.get('address')}
     Description: {meta.get('description', '')}
-    Include emojis, a strong headline, and standard contact info (708-314-0477).
+    
+    Include emojis, a strong headline, and the following contact details:
+    Phone: {phone}
+    Listing Courtesy of: {agent}, {brokerage}
+    {mls_info}
+    
+    Do NOT include any hardcoded locations like "Hyde Park" or "Chicago" unless they are in the address provided.
     """
     try:
         response = client.models.generate_content(model='gemini-2.0-flash', contents=prompt)
         return response.text
     except Exception:
-        return "Check out our new listing! Contact us at 708-314-0477 for details."
+        return f"Check out our new listing at {meta.get('address')}! Contact us at {phone} for details."
+    
+def generate_fb_post_content(meta, language="English"):
+    client = genai.Client(api_key=API_KEY)
+    
+    # Safely extract data from the meta dictionary
+    # This prevents the "Chicago" fallback by using the actual scraped address
+    address = meta.get('address', 'this stunning new listing')
+    price = meta.get('price', '')
+    agent = meta.get('agent', '')
+    brokerage = meta.get('brokerage', '')
+    phone = meta.get('phone', '') # No more hardcoded 708 number here
+    mls_source = meta.get('mls_source', '')
+    mls_number = meta.get('mls_number', '')
+    description = meta.get('description', '')
+
+    # The prompt now forces the AI to define the "Vibe" based on the Address
+    prompt = f"""
+    Write a professional, high-energy Facebook real estate post.
+    
+    STRICT LANGUAGE REQUIREMENT: All content must be written in {language}.
+    
+    PROPERTY DATA:
+    - Address: {address}
+    - Price: {price}
+    - Details: {description}
+    
+    CONTACT & BRANDING:
+    - Agent Name: {agent}
+    - Brokerage: {brokerage}
+    - Phone/Text: {phone}
+    - Compliance: {mls_source} | MLS# {mls_number}
+
+    POST STRUCTURE:
+    1. Hook: Catchy headline based on the city/area found in the Address.
+    2. Body: 3 bullet points highlighting the best features from the Details.
+    3. Call to Action: Invite them to call or text {phone}.
+    4. Sign-off: "Listing Courtesy of: [Agent Name], [Brokerage]" followed by the MLS info.
+
+    RULES:
+    - DO NOT mention Chicago, Hyde Park, or Woodlawn unless those names appear in the Address above.
+    - Use emojis relevant to the property type.
+    - If the language is Spanish, use an inviting, professional tone (e.g., "¡Oportunidad Única!").
+    """
+    
+    try:
+        response = client.models.generate_content(model='gemini-2.0-flash', contents=prompt)
+        return response.text
+    except Exception:
+        # Emergency fallback localized to the two main supported languages
+        if language == "Spanish":
+            return f"¡Nueva propiedad disponible en {address}! Contáctanos al {phone} para más información. Cortesía de {brokerage}."
+        return f"New listing available at {address}! Call or text {phone} for more details. Courtesy of {brokerage}."
+    
+    # client = genai.Client(api_key=API_KEY)
+    # prompt = f"""
+    # Generate a compelling Facebook post for this property in {language}.
+    # Address: {meta.get('address')}
+    # Description: {meta.get('description', '')}
+    # Include emojis, a strong headline, and standard contact info (708-314-0477).
+    # """
+    # try:
+    #     response = client.models.generate_content(model='gemini-2.0-flash', contents=prompt)
+    #     return response.text
+    # except Exception:
+    #     return "Check out our new listing! Contact us at 708-314-0477 for details."
