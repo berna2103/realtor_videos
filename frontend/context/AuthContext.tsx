@@ -20,14 +20,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [credits, setCredits] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 1. Define functions first and wrap in useCallback to prevent infinite re-renders
   const fetchCredits = useCallback(async (userId: string) => {
-    const { data } = await supabase
-      .from("user_credits")
-      .select("balance")
-      .eq("user_id", userId)
-      .maybeSingle();
-    setCredits(data ? data.balance : 0);
+    try {
+      const { data } = await supabase
+        .from("user_credits")
+        .select("balance")
+        .eq("user_id", userId)
+        .maybeSingle();
+      setCredits(data ? data.balance : 0);
+    } catch (error) {
+      console.error("Error fetching credits:", error);
+    }
   }, []);
 
   const refreshCredits = useCallback(async () => {
@@ -40,58 +43,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setCredits(null);
   };
 
-  // 2. Initial Session Check & Auth Listener
   useEffect(() => {
+    let isMounted = true;
+
     const initSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
+      if (session?.user && isMounted) {
         setUser(session.user);
         await fetchCredits(session.user.id);
       }
-      setIsLoading(false);
+      if (isMounted) setIsLoading(false);
     };
 
     initSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        await fetchCredits(session.user.id);
-      } else {
-        setUser(null);
-        setCredits(null);
+      if (isMounted) {
+        if (session?.user) {
+          setUser(session.user);
+          await fetchCredits(session.user.id);
+        } else {
+          setUser(null);
+          setCredits(null);
+        }
+        setIsLoading(false);
       }
-      setIsLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, [fetchCredits]);
 
-  // 3. The "Tab Switch" Magic Trick
-  // We ONLY listen for the window focus event here. Initial load is handled above.
-  useEffect(() => {
-    const handleFocus = () => {
-      if (user) {
-        refreshCredits();
-      }
-    };
-
-    window.addEventListener("focus", handleFocus);
-    
-    return () => {
-      window.removeEventListener("focus", handleFocus);
-    };
-  }, [user, refreshCredits]);
-
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      email: user?.email || null, 
-      credits, 
-      isLoading, 
-      refreshCredits, 
-      signOut 
-    }}>
+    <AuthContext.Provider value={{ user, email: user?.email || null, credits, isLoading, refreshCredits, signOut }}>
       {children}
     </AuthContext.Provider>
   );
@@ -99,8 +85,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
+  if (context === undefined) throw new Error("useAuth must be used within an AuthProvider");
   return context;
 };
