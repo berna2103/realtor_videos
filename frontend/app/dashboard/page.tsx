@@ -7,12 +7,11 @@ import {
   Film,
   ArrowLeft,
   Loader2,
-  MapPin,
-  Calendar,
   Download,
   Share2,
   Trash2,
   Plus,
+  LogOut,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -24,7 +23,7 @@ interface UserVideo {
 }
 
 export default function MyVideosDashboard() {
-  const { user, email, isLoading: authLoading } = useAuth();
+  const { user, email, isLoading: authLoading, signOut } = useAuth();
   const [videos, setVideos] = useState<UserVideo[]>([]);
   const [isFetchingVideos, setIsFetchingVideos] = useState(true);
   const [isMounted, setIsMounted] = useState(false);
@@ -81,7 +80,34 @@ export default function MyVideosDashboard() {
       setVideoToDelete(null);
     }
   };
-
+const handleDownload = async (url: string, address: string) => {
+    try {
+      // Fetch the file from Supabase
+      const response = await fetch(url);
+      const blob = await response.blob();
+      
+      // Create a local URL for the downloaded data
+      const blobUrl = window.URL.createObjectURL(blob);
+      
+      // Create a temporary link and trigger the download
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      
+      // Format the address into a safe filename (e.g., "123-Main-St.mp4")
+      const safeFileName = address.replace(/[^a-z0-9]/gi, '-').toLowerCase();
+      link.download = `${safeFileName}.mp4`;
+      
+      document.body.appendChild(link);
+      link.click();
+      
+      // Clean up
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error("Download failed:", error);
+      alert("Failed to download the video. Please try again.");
+    }
+  };
   // Show loader while checking auth or mounting
   if (!isMounted || authLoading) {
     return (
@@ -98,7 +124,7 @@ export default function MyVideosDashboard() {
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12 pb-8 border-b border-slate-200">
           <div>
             <Link
-              href="/"
+              href="/create"
               className="inline-flex items-center gap-2 text-sm font-bold text-blue-600 mb-6 group"
             >
               <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />{" "}
@@ -112,12 +138,24 @@ export default function MyVideosDashboard() {
               <span className="text-slate-900">{email}</span>
             </p>
           </div>
-          <Link
-            href="/"
-            className="bg-slate-900 text-white font-bold py-4 px-8 rounded-2xl flex items-center gap-2"
-          >
-            <Plus className="w-5 h-5" /> Create New Tour
-          </Link>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={async () => {
+                await signOut();
+                window.location.href = "/"; // Instantly kicks them back to landing page
+              }}
+              title="Sign Out"
+              className="p-3 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all cursor-pointer flex items-center justify-center active:scale-95"
+            >
+              <LogOut className="w-6 h-6" />
+            </button>
+            <Link
+              href="/create"
+              className="bg-slate-900 text-white font-bold py-4 px-8 rounded-2xl flex items-center gap-2"
+            >
+              <Plus className="w-5 h-5" /> Create New Tour
+            </Link>
+          </div>
         </div>
 
         {isFetchingVideos ? (
@@ -151,19 +189,44 @@ export default function MyVideosDashboard() {
                     className="w-full h-full object-cover"
                   />
                 </div>
-                <div className="p-6">
-                  <h3 className="text-base font-bold text-slate-900 line-clamp-2 mb-4">
-                    {video.property_address}
-                  </h3>
-                  <button
-                    onClick={() =>
-                      setVideoToDelete({ id: video.id, url: video.video_url })
-                    }
-                    className="text-red-500 hover:text-red-700 text-xs font-bold flex items-center gap-2"
-                  >
-                    <Trash2 className="w-4 h-4" /> Delete Video
-                  </button>
-                </div>
+                <div className="p-6 flex flex-col flex-grow">
+  <h3 className="text-base font-bold text-slate-900 line-clamp-2 mb-4">
+    {video.property_address}
+  </h3>
+  
+  <div className="mt-auto pt-4 border-t border-slate-100 flex items-center justify-between">
+    <div className="flex gap-4">
+      <button
+        onClick={() => {
+          navigator.clipboard.writeText(video.video_url);
+          alert("Video link copied to clipboard!");
+        }}
+        className="text-slate-500 hover:text-blue-600 flex items-center gap-1.5 text-sm font-semibold transition-colors"
+        title="Copy Link"
+      >
+        <Share2 className="w-4 h-4" /> Share
+      </button>
+      
+      <button
+        onClick={() => handleDownload(video.video_url, video.property_address)}
+        className="text-slate-500 hover:text-blue-600 flex items-center gap-1.5 text-sm font-semibold transition-colors"
+        title="Download Video"
+      >
+        <Download className="w-4 h-4" /> Save
+      </button>
+    </div>
+
+    <button
+      onClick={() =>
+        setVideoToDelete({ id: video.id, url: video.video_url })
+      }
+      className="text-red-500 hover:text-red-700 text-sm font-bold flex items-center gap-1.5 transition-colors"
+      title="Delete Video"
+    >
+      <Trash2 className="w-4 h-4" /> Delete
+    </button>
+  </div>
+</div>
               </div>
             ))}
           </div>
