@@ -297,7 +297,7 @@ export default function LandingPage() {
                 >
                   {isPlayingDemo ? (
                     <video 
-                      src={process.env.NEXT_PUBLIC_DEMO_VIDEO_URL || "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4"}
+                      src={process.env.NEXT_PUBLIC_VIDEO_URL || "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4"}
                       autoPlay 
                       controls 
                       className="w-full h-full object-cover"
