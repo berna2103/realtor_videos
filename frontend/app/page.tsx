@@ -28,6 +28,7 @@ export default function LandingPage() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [isPlayingDemo, setIsPlayingDemo] = useState(false);
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -283,29 +284,51 @@ export default function LandingPage() {
               </div>
             </div>
             
+          
             {/* Visual Representation of the UI */}
             <div className="relative">
               <div className="absolute inset-0 bg-blue-600/5 blur-[100px] rounded-full" />
               <div className="relative bg-white p-4 rounded-[2.5rem] shadow-2xl border border-slate-200 transform rotate-2 hover:rotate-0 transition-all duration-500">
-                <div className="aspect-[9/16] bg-slate-950 rounded-[2rem] overflow-hidden relative border-[8px] border-white shadow-inner">
-                  {/* Mock Video UI */}
-                  <img src="https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80" className="w-full h-full object-cover opacity-80" alt="Luxury home" />
-                  <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80" />
-                  
-                  {/* Play Button Mock */}
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/40">
-                      <Play className="w-6 h-6 text-white ml-1" fill="currentColor" />
-                    </div>
-                  </div>
+                
+                {/* 👇 Updated Video Container */}
+                <div 
+                  className="aspect-[9/16] bg-slate-950 rounded-[2rem] overflow-hidden relative border-[8px] border-white shadow-inner cursor-pointer group"
+                  onClick={() => setIsPlayingDemo(true)}
+                >
+                  {isPlayingDemo ? (
+                    <video 
+                      src={process.env.NEXT_PUBLIC_DEMO_VIDEO_URL || "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4"}
+                      autoPlay 
+                      controls 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <>
+                      {/* Mock Video UI */}
+                      <img 
+                        src="https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80" 
+                        className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-700" 
+                        alt="Luxury home" 
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80" />
+                      
+                      {/* Play Button Mock */}
+                      <div className="absolute inset-0 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                        <div className="w-16 h-16 bg-white/30 backdrop-blur-md rounded-full flex items-center justify-center border border-white/50 shadow-2xl">
+                          <Play className="w-6 h-6 text-white ml-1" fill="currentColor" />
+                        </div>
+                      </div>
 
-                  {/* Captions Mock */}
-                  <div className="absolute bottom-10 left-6 right-6 text-center">
-                    <p className="text-white font-sans font-bold text-lg drop-shadow-md bg-black/40 backdrop-blur-sm rounded-xl p-3 border border-white/10">
-                      "Welcome to this stunning 4-bedroom luxury estate..."
-                    </p>
-                  </div>
+                      {/* Captions Mock */}
+                      <div className="absolute bottom-10 left-6 right-6 text-center">
+                        <p className="text-white font-sans font-bold text-lg drop-shadow-md bg-black/40 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+                          "Welcome to this stunning 4-bedroom luxury estate..."
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
+
               </div>
             </div>
           </div>
