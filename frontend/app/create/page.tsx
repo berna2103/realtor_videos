@@ -135,7 +135,8 @@ const SidebarSettings = ({
   enableVoice, 
   setEnableVoice,   
   enableMusic, 
-  setEnableMusic
+  setEnableMusic,
+  saveBrandKit
 }: any) => (
   <div className="space-y-10">
     <section className="space-y-6">
@@ -232,6 +233,15 @@ const SidebarSettings = ({
             </label>
           )}
         </div>
+
+        {/* ENHANCEMENT: Save Brand Kit */}
+        <button
+          onClick={saveBrandKit}
+          className="w-full mt-2 py-3 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
+        >
+          <Settings className="w-4 h-4" /> Save as Default Brand
+        </button>
+
       </div>
     </section>
 
@@ -395,7 +405,11 @@ export default function CinematicListingApp() {
     mls_number: "",
   });
   const [scenes, setScenes] = useState<Scene[]>([]);
-  const [fbDraft, setFbDraft] = useState("");
+  
+  // ENHANCEMENT: Multi-platform Social Drafts
+  const [socialDrafts, setSocialDrafts] = useState({ facebook: "", instagram: "", tiktok: "" });
+  const [activeTab, setActiveTab] = useState("instagram");
+  const [renderProgress, setRenderProgress] = useState(0);
 
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
   const [showCaptions, setShowCaptions] = useState(true);
@@ -443,7 +457,23 @@ export default function CinematicListingApp() {
   useEffect(() => {
     const savedMeta = localStorage.getItem("draft_meta");
     const savedScenes = localStorage.getItem("draft_scenes");
-    if (savedMeta) setMeta(JSON.parse(savedMeta));
+    const savedBrand = localStorage.getItem("realtor_brand_kit");
+
+    // ENHANCEMENT: Pre-fill the Brand Kit
+    if (savedBrand) {
+      const parsed = JSON.parse(savedBrand);
+      setMeta(prev => ({
+        ...prev,
+        agent: parsed.agent || "",
+        brokerage: parsed.brokerage || "",
+        phone: parsed.phone || "",
+        website: parsed.website || ""
+      }));
+      if (parsed.primaryColor) setPrimaryColor(parsed.primaryColor);
+      if (parsed.logoData) setLogoData(parsed.logoData);
+    }
+
+    if (savedMeta) setMeta(prev => ({ ...prev, ...JSON.parse(savedMeta) }));
     if (savedScenes) setScenes(JSON.parse(savedScenes));
   }, []);
 
@@ -453,6 +483,19 @@ export default function CinematicListingApp() {
       localStorage.setItem("draft_scenes", JSON.stringify(scenes));
     }
   }, [meta, scenes]);
+
+  const saveBrandKit = () => {
+    const brandData = {
+      agent: meta.agent,
+      brokerage: meta.brokerage,
+      phone: meta.phone,
+      website: meta.website,
+      primaryColor: primaryColor,
+      logoData: logoData
+    };
+    localStorage.setItem("realtor_brand_kit", JSON.stringify(brandData));
+    alert("✅ Brand preferences saved as default!");
+  };
 
   const isCompliant =
     isOwnListing ||
@@ -519,18 +562,16 @@ export default function CinematicListingApp() {
 
       const data = await response.json();
 
-      // NEW: Catch backend errors (like 500 or 400) before changing state
       if (!response.ok) {
         throw new Error(data.detail || "Failed to fetch property data");
       }
 
       setMeta({ ...meta, ...data.meta });
-      setFbDraft(data.fbDraft || "");
-      // Fallback to empty array just in case
+      // ENHANCEMENT: Populate Social Drafts
+      setSocialDrafts(data.socialDrafts || { facebook: data.fbDraft || "", instagram: "", tiktok: "" });
       setScenes(data.scenes || []);
       setStep(2);
     } catch (error: any) {
-      // Actually display the error to the user so you aren't guessing
       console.error("Fetch error:", error);
       alert(`Fetch failed: ${error.message}`);
     } finally {
@@ -544,13 +585,13 @@ export default function CinematicListingApp() {
       return;
     }
 
-    // This catches it if the frontend state knows they are out of credits
     if (credits !== null && credits < 1) {
       setShowTopUpModal(true);
       return;
     }
 
     setIsRendering(true);
+    setRenderProgress(0);
     setRenderMsgIdx(0);
     const msgInterval = setInterval(
       () => setRenderMsgIdx((p) => (p + 1) % RENDER_MESSAGES.length),
@@ -575,20 +616,18 @@ export default function CinematicListingApp() {
           logo_data: logoData,
           is_own_listing: isOwnListing, 
           custom_cta: meta.custom_cta || null,
-          show_captions: showCaptions,         // <--- Captions flag
+          show_captions: showCaptions,
           enable_voice: enableVoice,
         }),
       });
 
-      // --- THE FIX: Intercept the 402 status from the backend ---
       if (res.status === 402) {
         clearInterval(msgInterval);
         setIsRendering(false);
         setShowTopUpModal(true);
-        return; // Stop execution here!
+        return; 
       }
 
-      // Catch any other backend failures (500, 400) before polling
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.detail || "Failed to start render job.");
@@ -598,27 +637,40 @@ export default function CinematicListingApp() {
       refreshCredits();
 
       const poll = setInterval(async () => {
-        const sRes = await fetch(`${API_URL}/api/job-status/${data.job_id}`);
-        const sData = await sRes.json();
-        if (sData.status === "completed") {
-          clearInterval(poll);
-          clearInterval(msgInterval);
-          setVideoUrl(sData.video_url);
-          setIsRendering(false);
-          setStep(3);
+        try {
+          const sRes = await fetch(`${API_URL}/api/job-status/${data.job_id}`);
+          const sData = await sRes.json();
+          
+          // ENHANCEMENT: Update rendering progress explicitly 
+          if (sData.progress) {
+            setRenderProgress(sData.progress);
+          }
 
-          localStorage.removeItem("draft_meta");
-          localStorage.removeItem("draft_scenes");
-        } else if (sData.status === "failed") {
-          clearInterval(poll);
-          clearInterval(msgInterval);
-          setIsRendering(false);
-          alert(`Render failed: ${sData.error || "Unknown error"}`);
+          if (sData.status === "completed") {
+            clearInterval(poll);
+            clearInterval(msgInterval);
+            setVideoUrl(sData.video_url);
+            setIsRendering(false);
+            setRenderProgress(0);
+            setStep(3);
+
+            localStorage.removeItem("draft_meta");
+            localStorage.removeItem("draft_scenes");
+          } else if (sData.status === "failed") {
+            clearInterval(poll);
+            clearInterval(msgInterval);
+            setIsRendering(false);
+            setRenderProgress(0);
+            alert(`Render failed: ${sData.error || "Unknown error"}`);
+          }
+        } catch (err) {
+          console.error("Polling error", err);
         }
       }, 3000);
     } catch (e: any) {
       clearInterval(msgInterval);
       setIsRendering(false);
+      setRenderProgress(0);
       alert(
         e.message ||
           "Network error. Could not connect to the rendering engine.",
@@ -643,20 +695,6 @@ export default function CinematicListingApp() {
     } finally {
       setIsDownloading(false);
     }
-  };
-
-  const handleFacebookShare = async () => {
-    if (!videoUrl) return;
-    if (fbDraft) {
-      try {
-        await navigator.clipboard.writeText(fbDraft);
-        alert("✅ Facebook caption copied to clipboard!");
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(videoUrl)}`;
-    window.open(fbUrl, "_blank", "width=600,height=500");
   };
 
   const handleStartOver = () => {
@@ -750,7 +788,6 @@ export default function CinematicListingApp() {
 
       {/* --- TOP NAVIGATION --- */}
       <nav className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur-xl flex items-center justify-between px-4 sm:px-8 z-30 relative">
-        {/* Logo Area */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="bg-slate-900 p-1.5 sm:p-2 rounded-xl shadow-lg shadow-slate-200">
             <Video className="w-5 h-5 text-white" />
@@ -761,7 +798,6 @@ export default function CinematicListingApp() {
           </h1>
         </div>
 
-        {/* Right Side Actions */}
         <div className="flex items-center gap-2 sm:gap-6">
           {user && (
             <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-slate-50 border border-slate-200 rounded-full shrink-0">
@@ -856,6 +892,7 @@ export default function CinematicListingApp() {
             setEnableVoice={setEnableVoice}
             enableMusic={enableMusic}
             setEnableMusic={setEnableMusic}
+            saveBrandKit={saveBrandKit}
           />
           {step > 1 && (
             <button
@@ -881,9 +918,26 @@ export default function CinematicListingApp() {
               <p className="font-serif text-xl font-bold text-slate-600 mb-3 tracking-tight">
                 This may take up to 5 minutes.
               </p>
-              <p className="text-slate-500 font-medium text-lg max-w-sm mx-auto">
+              <p className="text-slate-500 font-medium text-lg max-w-sm mx-auto mb-8">
                 {RENDER_MESSAGES[renderMsgIdx]}
               </p>
+              
+              {/* ENHANCEMENT: Rendering Progress Bar */}
+              <div className="w-full max-w-md mx-auto mt-8">
+                <div className="flex justify-between text-xs font-bold text-slate-500 mb-2">
+                  <span>Rendering Engine</span>
+                  <span>{renderProgress}%</span>
+                </div>
+                <div className="h-3 w-full bg-slate-200 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-blue-600 rounded-full transition-all duration-500 ease-out relative overflow-hidden"
+                    style={{ width: `${renderProgress}%` }}
+                  >
+                    <div className="absolute top-0 left-0 bottom-0 right-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]" />
+                  </div>
+                </div>
+              </div>
+
             </div>
           ) : step === 1 ? (
             <div className="max-w-4xl mx-auto py-24 text-center">
@@ -935,7 +989,6 @@ export default function CinematicListingApp() {
                   </p>
                 </div>
 
-                {/* Added mx-auto and justify-center here */}
                 <div className="flex flex-wrap justify-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm w-fit mx-auto">
                   {[
                     "Home For Sale",
@@ -1089,12 +1142,46 @@ export default function CinematicListingApp() {
                   )}{" "}
                   Download 4K MP4
                 </button>
-                <button
-                  onClick={handleFacebookShare}
-                  className="w-full bg-[#1877F2] text-white py-5 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-[#166fe5] transition-all shadow-lg active:scale-[0.98]"
-                >
-                  <Share2 className="w-5 h-5" /> Share to Facebook
-                </button>
+
+                {/* ENHANCEMENT: Multi-Platform Social Drafts Panel */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 text-left mt-2 shadow-sm">
+                  <div className="flex gap-2 mb-3">
+                    {['instagram', 'tiktok', 'facebook'].map(platform => (
+                      <button 
+                        key={platform}
+                        onClick={() => setActiveTab(platform)}
+                        className={`text-[11px] font-bold px-4 py-2 rounded-full capitalize transition-colors ${activeTab === platform ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
+                      >
+                        {platform}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea 
+                    readOnly
+                    value={socialDrafts[activeTab as keyof typeof socialDrafts]} 
+                    className="w-full h-28 text-sm bg-slate-50 border border-slate-100 rounded-xl p-3 resize-none outline-none text-slate-700 custom-scrollbar"
+                  />
+                  <div className="flex justify-between items-center mt-3">
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(socialDrafts[activeTab as keyof typeof socialDrafts]);
+                        alert(`✅ ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} caption copied!`);
+                      }}
+                      className="text-[11px] text-blue-600 font-bold hover:underline"
+                    >
+                      Copy Caption
+                    </button>
+                    {activeTab === 'facebook' && (
+                      <button
+                        onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(videoUrl!)}`, "_blank", "width=600,height=500")}
+                        className="text-[11px] bg-[#1877F2] text-white px-3 py-1.5 rounded-lg font-bold hover:bg-[#166fe5] transition-colors flex items-center gap-1.5"
+                      >
+                         <Share2 className="w-3 h-3" /> Post to FB
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <button
                   onClick={() => setStep(1)}
                   className="text-slate-400 font-bold text-sm mt-4 hover:text-slate-900 transition-colors"
@@ -1235,12 +1322,10 @@ export default function CinematicListingApp() {
       <div
         className={`fixed inset-0 z-[100] lg:hidden transition-all duration-300 ${isSettingsOpen ? "visible" : "invisible"}`}
       >
-        {/* Backdrop */}
         <div
           className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-300 ${isSettingsOpen ? "opacity-100" : "opacity-0"}`}
           onClick={() => setIsSettingsOpen(false)}
         />
-        {/* Panel */}
         <aside
           className={`absolute top-0 bottom-0 left-0 w-[85vw] max-w-sm bg-white border-r border-slate-200 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar transition-transform duration-300 ease-in-out ${isSettingsOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}
         >
@@ -1297,6 +1382,7 @@ export default function CinematicListingApp() {
             setEnableVoice={setEnableVoice}
             enableMusic={enableMusic}
             setEnableMusic={setEnableMusic}
+            saveBrandKit={saveBrandKit}
           />
           {step > 1 && (
             <button
@@ -1313,12 +1399,10 @@ export default function CinematicListingApp() {
       <div
         className={`fixed inset-0 z-[100] lg:hidden transition-all duration-300 ${isDetailsOpen ? "visible" : "invisible"}`}
       >
-        {/* Backdrop */}
         <div
           className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-300 ${isDetailsOpen ? "opacity-100" : "opacity-0"}`}
           onClick={() => setIsDetailsOpen(false)}
         />
-        {/* Panel */}
         <aside
           className={`absolute top-0 bottom-0 right-0 w-[85vw] max-w-sm bg-white border-l border-slate-200 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar transition-transform duration-300 ease-in-out ${isDetailsOpen ? "translate-x-0 shadow-2xl" : "translate-x-full"}`}
         >

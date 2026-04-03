@@ -95,7 +95,7 @@ def background_render_task(job_id: str, req: RenderRequest):
             jobs[job_id].update({"status": "completed", "progress": 100, "video_url": final_video_url})
     except Exception as e:
         print(f"\n--- FATAL ERROR RENDERING JOB {job_id} ---")
-        traceback.print_exc()  # <--- This will print the actual error to your terminal!
+        traceback.print_exc()  
         jobs[job_id].update({"status": "failed", "error": str(e)})
 
 @app.post("/api/fetch-zillow")
@@ -114,10 +114,18 @@ async def fetch_zillow(req: FetchRequest):
         print(f"Fetched metadata: {meta_data}")
         
         # 2. Generate content (FB Post and the Batch Video Script)
-        fb_draft = generate_fb_post_content(meta_data, req.language)
         base_url = get_base_url()
+        address_str = meta_data.get("address", "New Listing")
         
-        # --- NEW ENHANCEMENT: Call Gemini ONCE for all images ---
+        # --- NEW ENHANCEMENT: Generate Multi-Platform Social Drafts ---
+        facebook_draft = generate_fb_post_content(meta_data, req.language)
+        social_drafts = {
+            "facebook": facebook_draft,
+            "instagram": f"📸 Just Listed! {address_str} 🏡\n\nLink in bio for more details or drop a comment if you want a private tour! 👇\n\n#RealEstate #JustListed #DreamHome #HouseHunting",
+            "tiktok": f"Wait until you see the inside of this house! 🤯🏡 {address_str} #realestate #hometour #property"
+        }
+        
+        # --- ENHANCEMENT: Call Gemini ONCE for all images ---
         batch_analysis = analyze_scenes_batch(downloaded_images, req.language, meta_data)
         # --------------------------------------------------------
 
@@ -153,7 +161,7 @@ async def fetch_zillow(req: FetchRequest):
                 "enable_vo": True
             })
 
-        return {"meta": meta_data, "fbDraft": fb_draft, "scenes": scenes}
+        return {"meta": meta_data, "socialDrafts": social_drafts, "scenes": scenes}
         
     except Exception as e: 
         raise HTTPException(status_code=500, detail=str(e))

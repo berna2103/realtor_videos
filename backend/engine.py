@@ -1,5 +1,6 @@
 import os
 import asyncio
+import sys
 import hashlib
 import base64
 import glob
@@ -11,6 +12,7 @@ import random
 import math
 
 from PIL import Image, ImageDraw, ImageFont
+from proglog import ProgressBarLogger
 
 from moviepy import (
     ImageClip, 
@@ -26,6 +28,34 @@ from streamlit import status
 # Fix for MoviePy 1.0.3 & Pillow 10+
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
+
+# --- NEW ENHANCEMENT: PROGRESS REPORTING HELPERS ---
+def set_progress(job_id, percent):
+    """Safely updates the progress in the main thread's jobs dict without circular imports."""
+    if 'main' in sys.modules:
+        main_mod = sys.modules['main']
+        if hasattr(main_mod, 'jobs') and job_id in main_mod.jobs:
+            main_mod.jobs[job_id]['progress'] = percent
+
+class JobRenderLogger(ProgressBarLogger):
+    """Custom MoviePy Logger to track the frame-by-frame render status."""
+    def __init__(self, job_id, start_progress=50, end_progress=98):
+        super().__init__()
+        self.job_id = job_id
+        self.start_progress = start_progress
+        self.end_progress = end_progress
+
+    def bars_callback(self, bar, attr, value, old_value=None):
+        # MoviePy uses 't' to represent the time bar during frame rendering
+        if bar == 't':
+            bar_data = self.bars.get(bar)
+            if bar_data and bar_data.get('total'):
+                total = bar_data['total']
+                if total > 0:
+                    fraction = value / total
+                    current_prog = int(self.start_progress + (self.end_progress - self.start_progress) * fraction)
+                    set_progress(self.job_id, current_prog)
+# ---------------------------------------------------
 
 # --- ICONS & PATHS ---
 BED_PATHS = [[(0.1, 0.2), (0.1, 0.8)], [(0.1, 0.6), (0.9, 0.6), (0.9, 0.8)], [(0.2, 0.6), (0.2, 0.4), (0.5, 0.4), (0.5, 0.6)]]
@@ -379,11 +409,12 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
         if clip: layers.append(clip)
         
         if n == "cta": curr_y += 80
-        elif n in ["ph", "web"]: curr_y += 70
+        elif n == "ph": curr_y += 110  # <-- Increased padding after the phone number
+        elif n == "web": curr_y += 70
         elif n == "courtesy": curr_y += 30
         else: curr_y += 50
         fade += 0.6
-    
+        
     mls_txt = f"Source: {mls_source} | MLS# {mls_number}" if (mls_source or mls_number) else ""
     mls_clip = _text_clip(mls_txt, int(target_h * 0.016), (80, 80, 90), target_h - 60, 2.5, job_id, "mls")
     if mls_clip: layers.append(mls_clip)
@@ -568,10 +599,9 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
     animated_base = VideoClip(make_frame, duration=dur)
     layers = [animated_base]
 
-    # Add overlays (Preserve your existing Title/Caption logic)
+    
+    # Add overlays
     if is_first:
-        caption_text = scene_data.get('caption', '') if show_captions else ""
-
         layers.extend(create_title_overlay(
                 job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, 
                 font_choice, show_price, show_details, status_choice, 
@@ -579,14 +609,16 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
                 theme_color, base_dir, custom_cta=custom_cta, logo_path=logo_path
             ))
     else:
-        # Added .get() to safely handle missing captions just in case!
-        layers.extend(create_glass_caption(job_id, scene_data.get('caption', ''), dur, tw, th, font_choice, base_dir, vo_timings, theme_color))
-        
+        # ONLY generate the glass captions if the toggle is ON
+        if show_captions:
+            layers.extend(create_glass_caption(job_id, scene_data.get('caption', ''), dur, tw, th, font_choice, base_dir, vo_timings, theme_color))
+    
     final = CompositeVideoClip(layers, size=(tw, th)).with_duration(dur)
     if vo_clip: final = final.with_audio(vo_clip)
     return final
 
 async def render_cinematic_video(job_id, req, output_path, base_dir):
+    set_progress(job_id, 2)
     clips, final = [], None
     req_dict = req if isinstance(req, dict) else req.model_dump()
     meta, scenes = req_dict.get('meta', {}), req_dict.get('scenes', [])
@@ -612,6 +644,8 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
             logo_file_path = os.path.join(base_dir, f"temp_logo_{job_id}.png")
             Image.open(io.BytesIO(logo_data)).save(logo_file_path)
 
+        set_progress(job_id, 5)
+
         # Set Resolution based on format
         tw, th = (720, 1280) if "Vertical" in req_dict.get('format', 'Vertical') else (1280, 720)
 
@@ -625,6 +659,8 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
         else:
             voice_id = VOICE_MAP.get(requested_voice, "en-US-AndrewNeural")
 
+        set_progress(job_id, 10)
+
         # Generate Audio for all enabled scenes
         vo_tasks, vo_map = [], {}
         enable_voice = req_dict.get('enable_voice', True) #
@@ -637,12 +673,15 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
                     vo_map[s['id']] = {"path": p}
         
             if vo_tasks:
+                set_progress(job_id, 15)
                 results = await asyncio.gather(*vo_tasks)
                 for sid, res in zip(vo_map.keys(), results):
                     vo_map[sid]["timings"] = res
 
-    
+        set_progress(job_id, 25)
+
         # Build Video Clips using the new animated logic
+        total_scenes = len(scenes)
         for i, scene in enumerate(scenes):
             clips.append(create_animated_clip(
                 job_id, 
@@ -672,19 +711,24 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
                 req_dict.get('primary_color','#552448'), 
                 logo_file_path, 
                 base_dir, 
-                vo_data=vo_map.get(scene['id']), # <--- Notice the parenthesis closes here!
+                vo_data=vo_map.get(scene['id']), 
                 custom_cta= actual_custom_cta,
-                show_captions=True    # <--- Safely passed to the main function
+                show_captions=req_dict.get('show_captions', True) # <-- Pulls the boolean from your UI toggle
             ))
+            if total_scenes > 0:
+                set_progress(job_id, 25 + int(((i + 1) / total_scenes) * 20))
+
         # Add the End Screen
         clips.append(create_end_screen(
             job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), 
             meta.get('phone',''), meta.get('website',''), 5.0, lang, 
             meta.get('mls_source',''), meta.get('mls_number',''), 
             req_dict.get('font','Roboto'), req_dict.get('primary_color','#552448'), base_dir, 
-            req_dict.get('is_own_listing', True), # <--- Parenthesis closes here!
+            req_dict.get('is_own_listing', True),
             logo_path=logo_file_path
         ))
+
+        set_progress(job_id, 48)
 
         # Concatenate and Mix Audio
         final = concatenate_videoclips(clips)
@@ -702,7 +746,10 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
                 else:
                     final.audio = bg
 
-        # Final Render
+        set_progress(job_id, 50)
+
+        # Final Render Hooked Up to Custom Logger
+        render_logger = JobRenderLogger(job_id, start_progress=50, end_progress=99)
         final.write_videofile(
             output_path, 
             fps=24, 
@@ -710,7 +757,7 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
             audio_codec="aac", 
             threads=4, 
             preset="medium", 
-            logger=None, 
+            logger=render_logger, 
             ffmpeg_params=["-movflags", "faststart"]
         )
         return True
@@ -726,46 +773,3 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
         for tf in glob.glob(os.path.join(base_dir, f"temp_*{job_id}*")):
             try: os.remove(tf)
             except: pass
-
-
-# if __name__ == "__main__":
-#     print("Starting quick image test...")
-    
-#     # 1. Setup Test Variables
-#     test_base_dir = "."
-#     test_job_id = "quicktest"
-#     test_tw, test_th = 720, 1280 # Vertical format test
-    
-#     # 2. Create a dummy light-colored background to test the dark scrim & shadows
-#     dummy_bg = Image.new('RGB', (test_tw, test_th), (180, 190, 200)) 
-#     dummy_bg_path = os.path.join(test_base_dir, "test_dummy_bg.jpg")
-#     dummy_bg.save(dummy_bg_path)
-    
-#     test_scene_data = {'image_path': dummy_bg_path, 'caption': 'Test'}
-    
-#     # 3. Test the Title Screen (Includes scrim, drop shadows, icons, etc.)
-#     print("Rendering Title Screen frame...")
-#     title_clip = create_animated_clip(
-#         job_id=test_job_id, i=0, scene_data=test_scene_data, tw=test_tw, th=test_th, 
-#         is_first=True, addr="1234 Cinematic Way, Los Angeles, CA", price="2450000", 
-#         beds=5, baths=4, sqft=3200, lang="English", font_choice="Roboto-Bold", # Make sure this font exists in your /fonts folder
-#         show_price=True, show_details=True, voice_model="en-US-ChristopherNeural", 
-#         status_choice="Just Listed", agent_name="Jane Doe", brokerage="Prestige Realty", 
-#         phone="(555) 123-4567", mls_source="CRMLS", mls_number="SR24000000", 
-#         target_slide_dur=3.0, timing_mode="Auto", theme_color="#552448", 
-#         logo_path=None, base_dir=test_base_dir
-#     )
-#     title_clip.save_frame("test_output_title.png", t=0.0)
-    
-#     # 4. Test the End Screen (Includes Listing Courtesy Of & Auto-scaling text)
-#     print("Rendering End Screen frame...")
-#     end_clip = create_end_screen(
-#         job_id=test_job_id, target_w=test_tw, target_h=test_th, 
-#         agent_name="Jane Doe", brokerage="Prestige International Real Estate Group", # Long name to test scaling
-#         phone="(555) 123-4567", website="www.janedoerealestate.com", duration=5.0, 
-#         language="English", mls_source="CRMLS", mls_number="SR24000000", 
-#         font_choice="Montserrat", theme_color="#552448", base_dir=test_base_dir
-#     )
-#     end_clip.save_frame("test_output_endscreen.png", t=0.0)
-    
-#     print("Done! Open 'test_output_title.png' and 'test_output_endscreen.png' to check your layout.")
