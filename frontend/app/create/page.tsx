@@ -25,7 +25,7 @@ import {
   Globe,
   Phone,
   RefreshCw,
-  LayoutDashboard
+  LayoutDashboard,
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -61,7 +61,7 @@ const EFFECT_OPTIONS = [
   { label: "3D Perspective Pan Left", value: "3d_pan_left" },
   { label: "Drone Push (Bank Right)", value: "drone_push" },
   { label: "Drone Pull (Bank Left)", value: "drone_pull" },
-  { label: "Luxury Breathe (Cinematic Ease)", value: "luxury_breathe" }
+  { label: "Luxury Breathe (Cinematic Ease)", value: "luxury_breathe" },
 ];
 
 const VOICE_PREVIEWS: Record<string, string> = {
@@ -94,6 +94,8 @@ interface Meta {
   mls_number: string;
   phone: string;
   website: string;
+  custom_cta?: string;
+  custom_end_title?: string;
 }
 
 const RENDER_MESSAGES = [
@@ -127,7 +129,13 @@ const SidebarSettings = ({
   language,
   setLanguage,
   user,
-  isAuthLoading
+  isAuthLoading,
+  showCaptions, 
+  setShowCaptions, 
+  enableVoice, 
+  setEnableVoice,   
+  enableMusic, 
+  setEnableMusic
 }: any) => (
   <div className="space-y-10">
     <section className="space-y-6">
@@ -178,6 +186,18 @@ const SidebarSettings = ({
             />
           </div>
         </div>
+        <div className="space-y-2">
+          <label className="text-[11px] text-slate-500 font-bold uppercase ml-1 block">
+            Custom Call-to-Action (Optional)
+          </label>
+          <input
+            type="text"
+            placeholder="e.g., OPEN HOUSE SUNDAY!"
+            value={meta.custom_cta || ""}
+            onChange={(e) => setMeta({ ...meta, custom_cta: e.target.value })}
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
+          />
+        </div>
 
         <div className="space-y-3">
           <span className="text-[11px] text-slate-500 font-bold uppercase ml-1 block">
@@ -219,6 +239,33 @@ const SidebarSettings = ({
       <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
         <Settings className="w-3.5 h-3.5" /> Media Settings
       </h3>
+      <div className="space-y-2">
+        <label className="text-[11px] text-slate-500 font-bold uppercase ml-1 block">
+          Master Overrides
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          <button 
+            onClick={() => setShowCaptions(!showCaptions)} 
+            className={`py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${showCaptions ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300'}`}
+          >
+            Captions {showCaptions ? 'ON' : 'OFF'}
+          </button>
+          
+          <button 
+            onClick={() => setEnableVoice(!enableVoice)} 
+            className={`py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${enableVoice ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300'}`}
+          >
+            Voice {enableVoice ? 'ON' : 'OFF'}
+          </button>
+          
+          <button 
+            onClick={() => setEnableMusic(!enableMusic)} 
+            className={`py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${enableMusic ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300'}`}
+          >
+            Music {enableMusic ? 'ON' : 'OFF'}
+          </button>
+        </div>
+      </div>
       <div className="space-y-5">
         <div className="space-y-2">
           <label className="text-[11px] text-slate-500 font-bold uppercase ml-1 block">
@@ -311,14 +358,14 @@ const SidebarSettings = ({
     {user && (
       <div className="pt-8 border-t border-slate-100">
         {!isAuthLoading && user && (
-        <Link 
-          href="/dashboard" 
-          className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-xl hover:bg-slate-50 transition-all"
-        >
-          <Film className="w-4 h-4 text-blue-600" />
-          <span className="font-bold text-slate-700">My Video Library</span>
-        </Link>
-      )}
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-xl hover:bg-slate-50 transition-all"
+          >
+            <Film className="w-4 h-4 text-blue-600" />
+            <span className="font-bold text-slate-700">My Video Library</span>
+          </Link>
+        )}
       </div>
     )}
   </div>
@@ -331,10 +378,8 @@ export default function CinematicListingApp() {
     credits,
     signOut,
     refreshCredits,
-    isLoading: isAuthLoading
+    isLoading: isAuthLoading,
   } = useAuth();
-
-
 
   const [meta, setMeta] = useState<Meta>({
     address: "",
@@ -353,6 +398,9 @@ export default function CinematicListingApp() {
   const [fbDraft, setFbDraft] = useState("");
 
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
+  const [showCaptions, setShowCaptions] = useState(true);
+  const [enableVoice, setEnableVoice] = useState(true);
+  const [enableMusic, setEnableMusic] = useState(true);
 
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
@@ -463,7 +511,7 @@ export default function CinematicListingApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ zillowUrl, language }),
       });
-      
+
       if (response.status === 402) {
         setShowTopUpModal(true);
         return;
@@ -479,7 +527,7 @@ export default function CinematicListingApp() {
       setMeta({ ...meta, ...data.meta });
       setFbDraft(data.fbDraft || "");
       // Fallback to empty array just in case
-      setScenes(data.scenes || []); 
+      setScenes(data.scenes || []);
       setStep(2);
     } catch (error: any) {
       // Actually display the error to the user so you aren't guessing
@@ -490,25 +538,25 @@ export default function CinematicListingApp() {
     }
   };
 
- const handleRenderVideo = async () => {
+  const handleRenderVideo = async () => {
     if (!user) {
       setShowAuthModal(true);
       return;
     }
-    
+
     // This catches it if the frontend state knows they are out of credits
     if (credits !== null && credits < 1) {
       setShowTopUpModal(true);
       return;
     }
-    
+
     setIsRendering(true);
     setRenderMsgIdx(0);
     const msgInterval = setInterval(
       () => setRenderMsgIdx((p) => (p + 1) % RENDER_MESSAGES.length),
       8000,
     );
-    
+
     try {
       const res = await fetch(`${API_URL}/api/render-video`, {
         method: "POST",
@@ -521,10 +569,14 @@ export default function CinematicListingApp() {
           language,
           voice,
           font,
-          music,
+          music: enableMusic ? music : "none",
           status_choice: statusChoice,
           primary_color: primaryColor,
           logo_data: logoData,
+          is_own_listing: isOwnListing, 
+          custom_cta: meta.custom_cta || null,
+          show_captions: showCaptions,         // <--- Captions flag
+          enable_voice: enableVoice,
         }),
       });
 
@@ -544,7 +596,7 @@ export default function CinematicListingApp() {
 
       const data = await res.json();
       refreshCredits();
-      
+
       const poll = setInterval(async () => {
         const sRes = await fetch(`${API_URL}/api/job-status/${data.job_id}`);
         const sData = await sRes.json();
@@ -554,21 +606,23 @@ export default function CinematicListingApp() {
           setVideoUrl(sData.video_url);
           setIsRendering(false);
           setStep(3);
-          
+
           localStorage.removeItem("draft_meta");
           localStorage.removeItem("draft_scenes");
         } else if (sData.status === "failed") {
           clearInterval(poll);
           clearInterval(msgInterval);
           setIsRendering(false);
-          alert(`Render failed: ${sData.error || 'Unknown error'}`);
+          alert(`Render failed: ${sData.error || "Unknown error"}`);
         }
       }, 3000);
-      
     } catch (e: any) {
       clearInterval(msgInterval);
       setIsRendering(false);
-      alert(e.message || "Network error. Could not connect to the rendering engine.");
+      alert(
+        e.message ||
+          "Network error. Could not connect to the rendering engine.",
+      );
     }
   };
   const handleForceDownload = async () => {
@@ -696,7 +750,6 @@ export default function CinematicListingApp() {
 
       {/* --- TOP NAVIGATION --- */}
       <nav className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur-xl flex items-center justify-between px-4 sm:px-8 z-30 relative">
-        
         {/* Logo Area */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="bg-slate-900 p-1.5 sm:p-2 rounded-xl shadow-lg shadow-slate-200">
@@ -714,7 +767,8 @@ export default function CinematicListingApp() {
             <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-slate-50 border border-slate-200 rounded-full shrink-0">
               <Coins className="w-4 h-4 text-blue-600" />
               <span className="text-sm font-bold text-slate-700">
-                {credits}<span className="hidden sm:inline"> Credits</span>
+                {credits}
+                <span className="hidden sm:inline"> Credits</span>
               </span>
               <button
                 onClick={() => setShowTopUpModal(true)}
@@ -724,7 +778,7 @@ export default function CinematicListingApp() {
               </button>
             </div>
           )}
-          
+
           {user ? (
             <div className="flex items-center gap-1 sm:gap-4 shrink-0">
               <Link
@@ -737,7 +791,7 @@ export default function CinematicListingApp() {
               <span className="text-sm text-slate-500 hidden md:block font-medium">
                 {userEmail}
               </span>
-              
+
               <button
                 onClick={signOut}
                 className="p-1.5 sm:p-2 text-slate-400 hover:text-red-500 transition-colors"
@@ -758,7 +812,6 @@ export default function CinematicListingApp() {
 
       {/* --- MAIN APP LAYOUT (DESKTOP) --- */}
       <div className="flex flex-1 overflow-hidden relative w-full">
-        
         {/* DESKTOP ONLY: Left Sidebar */}
         <aside className="hidden lg:flex w-80 border-r border-slate-200 flex-col bg-white overflow-y-auto p-8 gap-8 custom-scrollbar flex-shrink-0 relative z-10">
           <SidebarSettings
@@ -797,6 +850,12 @@ export default function CinematicListingApp() {
             setLanguage={setLanguage}
             user={user}
             isAuthLoading={isAuthLoading}
+            showCaptions={showCaptions}
+            setShowCaptions={setShowCaptions}
+            enableVoice={enableVoice}
+            setEnableVoice={setEnableVoice}
+            enableMusic={enableMusic}
+            setEnableMusic={setEnableMusic}
           />
           {step > 1 && (
             <button
@@ -820,7 +879,7 @@ export default function CinematicListingApp() {
                 Finishing Your Tour
               </h2>
               <p className="font-serif text-xl font-bold text-slate-600 mb-3 tracking-tight">
-                  This may take up to 5 minutes.
+                This may take up to 5 minutes.
               </p>
               <p className="text-slate-500 font-medium text-lg max-w-sm mx-auto">
                 {RENDER_MESSAGES[renderMsgIdx]}
@@ -866,132 +925,138 @@ export default function CinematicListingApp() {
             </div>
           ) : step === 2 ? (
             <div className="max-w-5xl mx-auto space-y-12">
-  <header className="flex flex-col items-center text-center gap-6">
-  <div>
-    <h2 className="font-serif text-4xl sm:text-5xl font-bold text-slate-900 tracking-tight">
-      Storyboard
-    </h2>
-    <p className="text-slate-500 text-lg mt-1 font-medium">
-      Customize your cinematic narrative.
-    </p>
-  </div>
-  
-  {/* Added mx-auto and justify-center here */}
-  <div className="flex flex-wrap justify-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm w-fit mx-auto">
-    {[
-      "Home For Sale",
-      "Coming Soon",
-      "Just Listed",
-      "Under Contract",
-      "Open House",
-      "Price Reduced",
-      "Just Sold",
-    ].map((s) => (
-      <button
-        key={s}
-        onClick={() => setStatusChoice(s)}
-        className={`px-5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-all ${
-          statusChoice === s
-            ? "bg-slate-900 text-white shadow-lg"
-            : "text-slate-500 hover:bg-slate-50"
-        }`}
-      >
-        {s}
-      </button>
-    ))}
-  </div>
-</header>
-  
-  <div className="grid gap-8">
-    {scenes.map((s, i) => (
-      <div
-        key={i}
-        className="bg-white border border-slate-200 rounded-[2rem] p-4 sm:p-8 flex flex-col gap-6 group hover:border-blue-500/30 hover:shadow-xl transition-all duration-500"
-      >
-        <div className="w-full aspect-video bg-slate-100 rounded-2xl overflow-hidden relative shadow-inner flex-shrink-0">
-          <img
-            src={s.image_url}
-            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-            alt="Scene preview"
-          />
-          <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-black text-slate-900 shadow-sm border border-slate-100">
-            SCENE {i + 1}
-          </div>
-        </div>
-        
-        <div className="flex-1 flex flex-col gap-5">
-          <div className="relative">
-            <textarea
-              value={s.caption}
-              onChange={(e) => updateScene(i, "caption", e.target.value)}
-              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-5 text-slate-800 text-base leading-relaxed outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500/50 resize-none h-28 transition-all"
-            />
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest hidden sm:inline">
-                Effect:
-              </span>
-              <select
-                value={s.effect}
-                onChange={(e) => updateScene(i, "effect", e.target.value)}
-                className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm text-slate-700 font-medium outline-none hover:border-slate-300 transition-colors"
-              >
-                {EFFECT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => moveScene(i, "up")}
-                disabled={i === 0}
-                className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 hover:text-slate-900 disabled:opacity-30 transition-all active:scale-90"
-              >
-                <ArrowUp className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => moveScene(i, "down")}
-                disabled={i === scenes.length - 1}
-                className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 hover:text-slate-900 disabled:opacity-30 transition-all active:scale-90"
-              >
-                <ArrowDown className="w-4 h-4" />
-              </button>
-              <div className="w-[1px] h-6 bg-slate-200 mx-1" />
-              <button
-                onClick={() => setScenes(scenes.filter((_, idx) => idx !== i))}
-                className="p-3 bg-red-50 text-red-400 border border-red-100 rounded-xl hover:bg-red-500 hover:text-white transition-all active:scale-90"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    ))}
-  </div>
+              <header className="flex flex-col items-center text-center gap-6">
+                <div>
+                  <h2 className="font-serif text-4xl sm:text-5xl font-bold text-slate-900 tracking-tight">
+                    Storyboard
+                  </h2>
+                  <p className="text-slate-500 text-lg mt-1 font-medium">
+                    Customize your cinematic narrative.
+                  </p>
+                </div>
 
-  <div className="hidden lg:block fixed bottom-10 left-1/2 -translate-x-1/2 z-40 w-full max-w-sm px-6">
-    <button
-      onClick={handleRenderVideo}
-      disabled={!isCompliant}
-      className="w-full bg-slate-900 hover:bg-black text-white py-6 rounded-[2rem] font-bold text-sm shadow-2xl flex items-center justify-center gap-3 disabled:opacity-40 transition-all active:scale-[0.97] group"
-    >
-      <Film className="w-5 h-5 text-blue-400 group-hover:rotate-12 transition-transform" />{" "}
-      Create Full HD Video
-    </button>
-    {!isCompliant && (
-      <div className="mt-4 flex items-center justify-center gap-2 bg-white/90 backdrop-blur border border-red-100 px-4 py-2 rounded-full shadow-lg">
-        <AlertCircle className="w-3.5 h-3.5 text-red-500" />
-        <p className="text-[11px] text-red-600 font-bold uppercase tracking-tighter">
-          Missing Brokerage Info
-        </p>
-      </div>
-    )}
-  </div>
-</div>
+                {/* Added mx-auto and justify-center here */}
+                <div className="flex flex-wrap justify-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm w-fit mx-auto">
+                  {[
+                    "Home For Sale",
+                    "Coming Soon",
+                    "Just Listed",
+                    "Under Contract",
+                    "Open House",
+                    "Price Reduced",
+                    "Just Sold",
+                  ].map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setStatusChoice(s)}
+                      className={`px-5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-all ${
+                        statusChoice === s
+                          ? "bg-slate-900 text-white shadow-lg"
+                          : "text-slate-500 hover:bg-slate-50"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </header>
+
+              <div className="grid gap-8">
+                {scenes.map((s, i) => (
+                  <div
+                    key={i}
+                    className="bg-white border border-slate-200 rounded-[2rem] p-4 sm:p-8 flex flex-col gap-6 group hover:border-blue-500/30 hover:shadow-xl transition-all duration-500"
+                  >
+                    <div className="w-full aspect-video bg-slate-100 rounded-2xl overflow-hidden relative shadow-inner flex-shrink-0">
+                      <img
+                        src={s.image_url}
+                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                        alt="Scene preview"
+                      />
+                      <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-black text-slate-900 shadow-sm border border-slate-100">
+                        SCENE {i + 1}
+                      </div>
+                    </div>
+
+                    <div className="flex-1 flex flex-col gap-5">
+                      <div className="relative">
+                        <textarea
+                          value={s.caption}
+                          onChange={(e) =>
+                            updateScene(i, "caption", e.target.value)
+                          }
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-5 text-slate-800 text-base leading-relaxed outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500/50 resize-none h-28 transition-all"
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest hidden sm:inline">
+                            Effect:
+                          </span>
+                          <select
+                            value={s.effect}
+                            onChange={(e) =>
+                              updateScene(i, "effect", e.target.value)
+                            }
+                            className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm text-slate-700 font-medium outline-none hover:border-slate-300 transition-colors"
+                          >
+                            {EFFECT_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => moveScene(i, "up")}
+                            disabled={i === 0}
+                            className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 hover:text-slate-900 disabled:opacity-30 transition-all active:scale-90"
+                          >
+                            <ArrowUp className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => moveScene(i, "down")}
+                            disabled={i === scenes.length - 1}
+                            className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 hover:text-slate-900 disabled:opacity-30 transition-all active:scale-90"
+                          >
+                            <ArrowDown className="w-4 h-4" />
+                          </button>
+                          <div className="w-[1px] h-6 bg-slate-200 mx-1" />
+                          <button
+                            onClick={() =>
+                              setScenes(scenes.filter((_, idx) => idx !== i))
+                            }
+                            className="p-3 bg-red-50 text-red-400 border border-red-100 rounded-xl hover:bg-red-500 hover:text-white transition-all active:scale-90"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden lg:block fixed bottom-10 left-1/2 -translate-x-1/2 z-40 w-full max-w-sm px-6">
+                <button
+                  onClick={handleRenderVideo}
+                  disabled={!isCompliant}
+                  className="w-full bg-slate-900 hover:bg-black text-white py-6 rounded-[2rem] font-bold text-sm shadow-2xl flex items-center justify-center gap-3 disabled:opacity-40 transition-all active:scale-[0.97] group"
+                >
+                  <Film className="w-5 h-5 text-blue-400 group-hover:rotate-12 transition-transform" />{" "}
+                  Create Full HD Video
+                </button>
+                {!isCompliant && (
+                  <div className="mt-4 flex items-center justify-center gap-2 bg-white/90 backdrop-blur border border-red-100 px-4 py-2 rounded-full shadow-lg">
+                    <AlertCircle className="w-3.5 h-3.5 text-red-500" />
+                    <p className="text-[11px] text-red-600 font-bold uppercase tracking-tighter">
+                      Missing Brokerage Info
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="max-w-xl mx-auto py-12 text-center">
               <div className="w-20 h-20 bg-emerald-50 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-inner">
@@ -1167,17 +1232,26 @@ export default function CinematicListingApp() {
       {/* --- OUTSIDE THE LAYOUT TRAP: MOBILE UI ELEMENTS --- */}
 
       {/* MOBILE LEFT DRAWER (SETTINGS) */}
-      <div className={`fixed inset-0 z-[100] lg:hidden transition-all duration-300 ${isSettingsOpen ? "visible" : "invisible"}`}>
+      <div
+        className={`fixed inset-0 z-[100] lg:hidden transition-all duration-300 ${isSettingsOpen ? "visible" : "invisible"}`}
+      >
         {/* Backdrop */}
-        <div 
-          className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-300 ${isSettingsOpen ? "opacity-100" : "opacity-0"}`} 
-          onClick={() => setIsSettingsOpen(false)} 
+        <div
+          className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-300 ${isSettingsOpen ? "opacity-100" : "opacity-0"}`}
+          onClick={() => setIsSettingsOpen(false)}
         />
         {/* Panel */}
-        <aside className={`absolute top-0 bottom-0 left-0 w-[85vw] max-w-sm bg-white border-r border-slate-200 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar transition-transform duration-300 ease-in-out ${isSettingsOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}>
+        <aside
+          className={`absolute top-0 bottom-0 left-0 w-[85vw] max-w-sm bg-white border-r border-slate-200 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar transition-transform duration-300 ease-in-out ${isSettingsOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}
+        >
           <div className="flex items-center justify-between mb-2">
-            <h2 className="font-serif text-2xl font-bold text-slate-900">Settings</h2>
-            <button onClick={() => setIsSettingsOpen(false)} className="p-2 bg-slate-100 rounded-full text-slate-500 hover:text-slate-900 active:scale-95 transition-all">
+            <h2 className="font-serif text-2xl font-bold text-slate-900">
+              Settings
+            </h2>
+            <button
+              onClick={() => setIsSettingsOpen(false)}
+              className="p-2 bg-slate-100 rounded-full text-slate-500 hover:text-slate-900 active:scale-95 transition-all"
+            >
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -1217,6 +1291,12 @@ export default function CinematicListingApp() {
             setLanguage={setLanguage}
             user={user}
             usAuthLoading={isAuthLoading}
+            showCaptions={showCaptions}
+            setShowCaptions={setShowCaptions}
+            enableVoice={enableVoice}
+            setEnableVoice={setEnableVoice}
+            enableMusic={enableMusic}
+            setEnableMusic={setEnableMusic}
           />
           {step > 1 && (
             <button
@@ -1230,17 +1310,26 @@ export default function CinematicListingApp() {
       </div>
 
       {/* MOBILE RIGHT DRAWER (DETAILS) */}
-      <div className={`fixed inset-0 z-[100] lg:hidden transition-all duration-300 ${isDetailsOpen ? "visible" : "invisible"}`}>
+      <div
+        className={`fixed inset-0 z-[100] lg:hidden transition-all duration-300 ${isDetailsOpen ? "visible" : "invisible"}`}
+      >
         {/* Backdrop */}
-        <div 
-          className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-300 ${isDetailsOpen ? "opacity-100" : "opacity-0"}`} 
-          onClick={() => setIsDetailsOpen(false)} 
+        <div
+          className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-300 ${isDetailsOpen ? "opacity-100" : "opacity-0"}`}
+          onClick={() => setIsDetailsOpen(false)}
         />
         {/* Panel */}
-        <aside className={`absolute top-0 bottom-0 right-0 w-[85vw] max-w-sm bg-white border-l border-slate-200 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar transition-transform duration-300 ease-in-out ${isDetailsOpen ? "translate-x-0 shadow-2xl" : "translate-x-full"}`}>
+        <aside
+          className={`absolute top-0 bottom-0 right-0 w-[85vw] max-w-sm bg-white border-l border-slate-200 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar transition-transform duration-300 ease-in-out ${isDetailsOpen ? "translate-x-0 shadow-2xl" : "translate-x-full"}`}
+        >
           <div className="flex items-center justify-between mb-2">
-            <h2 className="font-serif text-2xl font-bold text-slate-900">Details</h2>
-            <button onClick={() => setIsDetailsOpen(false)} className="p-2 bg-slate-100 rounded-full text-slate-500 hover:text-slate-900 active:scale-95 transition-all">
+            <h2 className="font-serif text-2xl font-bold text-slate-900">
+              Details
+            </h2>
+            <button
+              onClick={() => setIsDetailsOpen(false)}
+              className="p-2 bg-slate-100 rounded-full text-slate-500 hover:text-slate-900 active:scale-95 transition-all"
+            >
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -1369,7 +1458,7 @@ export default function CinematicListingApp() {
       {step === 2 && !isRendering && (
         <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200 p-4 z-[90] pb-safe shadow-[0_-10px_40px_rgba(0,0,0,0.1)]">
           <div className="flex items-center justify-between max-w-md mx-auto px-2">
-            <button 
+            <button
               onClick={() => setIsSettingsOpen(true)}
               className="flex flex-col items-center gap-1.5 p-2 text-slate-500 hover:text-blue-600 transition-colors"
             >
@@ -1387,7 +1476,7 @@ export default function CinematicListingApp() {
               </button>
             </div>
 
-            <button 
+            <button
               onClick={() => setIsDetailsOpen(true)}
               className="flex flex-col items-center gap-1.5 p-2 text-slate-500 hover:text-blue-600 transition-colors relative"
             >
@@ -1414,7 +1503,8 @@ export default function CinematicListingApp() {
               Start Over?
             </h2>
             <p className="text-slate-500 text-sm mb-8 leading-relaxed">
-              This will permanently clear your current storyboard, captions, and property details. This action cannot be undone.
+              This will permanently clear your current storyboard, captions, and
+              property details. This action cannot be undone.
             </p>
             <div className="flex flex-col gap-3">
               <button

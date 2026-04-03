@@ -21,6 +21,7 @@ from moviepy import (
     CompositeAudioClip,
     concatenate_audioclips, 
 )
+from streamlit import status
 
 # Fix for MoviePy 1.0.3 & Pillow 10+
 if not hasattr(Image, 'ANTIALIAS'):
@@ -76,13 +77,14 @@ def create_gradient_scrim(width, height, max_alpha=180):
     scrim.paste(black, (0, 0), mask=mask)
     return scrim
 
+
 def draw_unit_icon(draw, paths, center_x, center_y, scale_factor, color):
     for path in paths:
         scaled_points = [(p[0] * scale_factor + center_x - (scale_factor/2), 
                           p[1] * scale_factor + center_y - (scale_factor/2)) for p in path]
         draw.line(scaled_points, fill=color, width=2)
 
-def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir):
+def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None, show_captions=True):
     if not show_details and not show_price: return []
     color_white, color_light_gray = (255, 255, 255, 255), (210, 210, 210, 255)
     color_pill_fill, color_pill_outline = (25, 25, 25, 140), (255, 255, 255, 40)
@@ -91,30 +93,42 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
     scrim = create_gradient_scrim(tw, th)
     overlay_img.paste(scrim, (0, 0), mask=scrim)
     
+    # --- NEW LOGO DRAWING LOGIC ---
+    if logo_path and os.path.exists(logo_path):
+        try:
+            logo_img = Image.open(logo_path).convert("RGBA")
+            # Constrain logo to 40% width or 12% height so it looks professional
+            logo_max_w, logo_max_h = int(tw * 0.4), int(th * 0.12)
+            logo_img.thumbnail((logo_max_w, logo_max_h), Image.Resampling.LANCZOS)
+            lx = (tw - logo_img.width) // 2
+            ly = int(th * 0.05) # Position near the top
+            overlay_img.paste(logo_img, (lx, ly), logo_img) # 3rd arg uses PNG transparency
+        except Exception as e:
+            print(f"Failed to draw logo: {e}")
+
     draw = ImageDraw.Draw(overlay_img)
     
-    # 1. Base font sizes (Notice f_agent and f_cta are larger now)
+    # Shift text down slightly if a logo is present
+    y_status = int(th * 0.22) if logo_path else int(th * 0.20)
+    y_price, y_pill, y_addr, y_agent, y_cta = int(th * 0.32), int(th * 0.62), int(th * 0.74), int(th * 0.85), int(th * 0.91)
+
+    # ... [Keep your existing Font Size logic here] ...
     status_font_size = int(th * 0.080)
     f_status = get_font(font_choice, status_font_size, base_dir)
     f_price = get_font(font_choice, int(th * 0.050), base_dir)
     f_pill = get_font(font_choice, int(th * 0.022), base_dir)
     f_addr = get_font(font_choice, int(th * 0.024), base_dir)
-    f_agent = get_font(font_choice, int(th * 0.028), base_dir) # Increased for emphasis
-    f_cta = get_font(font_choice, int(th * 0.035), base_dir)   # Increased for emphasis
-
-    y_status, y_price, y_pill, y_addr, y_agent, y_cta = int(th * 0.20), int(th * 0.32), int(th * 0.62), int(th * 0.74), int(th * 0.85), int(th * 0.91)
+    f_agent = get_font(font_choice, int(th * 0.028), base_dir) 
+    f_cta = get_font(font_choice, int(th * 0.035), base_dir)   
 
     if status:
         status_text = status.strip()
-        max_width = int(tw * 0.90) # Limit text to 90% of screen width
+        max_width = int(tw * 0.90) 
         bbox = draw.textbbox((0, 0), status_text, font=f_status)
-        
-        # 2. Dynamic Font Scaling: Shrink font until it fits within max_width
         while (bbox[2] - bbox[0]) > max_width and status_font_size > 10:
             status_font_size -= 2
             f_status = get_font(font_choice, status_font_size, base_dir)
             bbox = draw.textbbox((0, 0), status_text, font=f_status)
-
         x_pos = (tw - (bbox[2] - bbox[0])) // 2
         draw_text_with_shadow(draw, (x_pos, y_status), status_text, f_status, color_white)
 
@@ -159,31 +173,61 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
         txt = f"Agent Contact: {phone}"
         bbox = draw.textbbox((0, 0), txt, font=f_agent)
         x_pos = (tw - (bbox[2] - bbox[0])) // 2
-        # Color changed to solid white for extra pop, shadow kept
         draw_text_with_shadow(draw, (x_pos, y_agent), txt, f_agent, (255, 255, 255, 255))
 
-    # 3. Emphasized CTA Button
-    cta_text = "SCHEDULE SHOWING!"
+    # --- BUG FIX: Strip empty spaces so CTA doesn't disappear ---
+    def get_dynamic_cta(status_val, language, custom_cta_val=None):
+        if custom_cta_val and custom_cta_val.strip(): 
+            return custom_cta_val.strip().upper()
+            
+        cta_map = {
+            "English": {
+                "Just Sold": "VIEW OUR SUCCESS STORIES!",
+                "Under Contract": "JOIN BACKUP LIST!",
+                "Coming Soon": "GET EARLY ACCESS!",
+                "Open House": "VISIT US THIS WEEKEND!",
+                "Price Reduced": "NEW PRICE - SEE IT TODAY!",
+                "Just Listed": "BE THE FIRST TO SEE IT!",
+                "Home For Sale": "SCHEDULE A SHOWING!",
+                "default": "SCHEDULE A SHOWING!"
+            },
+            "Spanish": {
+                "Just Sold": "¡MIRA NUESTROS ÉXITOS!",
+                "Under Contract": "¡LISTA DE ESPERA!",
+                "Coming Soon": "¡ACCESO ANTICIPADO!",
+                "Open House": "¡VEN ESTE FIN DE SEMANA!",
+                "Price Reduced": "¡NUEVO PRECIO - VISÍTALO HOY!",
+                "Just Listed": "¡SÉ EL PRIMERO EN VERLO!",
+                "Home For Sale": "¡AGENDA TU CITA!",
+                "default": "¡AGENDA TU CITA!"
+            }
+        }
+        lang_dict = cta_map.get(language, cta_map["English"])
+        return lang_dict.get(status_val, lang_dict["default"])
+
+    cta_text = get_dynamic_cta(status, lang, custom_cta)
+
     bbox = draw.textbbox((0, 0), cta_text, font=f_cta)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
     x_pos = (tw - text_w) // 2
     
-    # Draw a colored background button for the CTA
     pad_x = int(tw * 0.04)
     pad_y = int(th * 0.015)
-    btn_color = theme_color if theme_color else (220, 50, 50, 255) # Uses theme_color or falls back to red
+    btn_color = theme_color if theme_color else (220, 50, 50, 255)
     draw.rounded_rectangle(
         [x_pos - pad_x, y_cta - pad_y, x_pos + text_w + pad_x, y_cta + text_h + pad_y],
         radius=int(th * 0.015),
         fill=btn_color
     )
-    draw_text_with_shadow(draw, (x_pos, y_cta), cta_text, f_cta, color_white)
+
+    adjusted_y_cta = y_cta - bbox[1]
+    draw_text_with_shadow(draw, (x_pos, adjusted_y_cta), cta_text, f_cta, color_white)
 
     temp = os.path.join(base_dir, f"temp_title_{job_id}.png")
     overlay_img.save(temp)
     return [ImageClip(temp).with_duration(dur)]
-    
+
 def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice, base_dir, timings=None, theme_color="#552448"):
     if not text: return []
     
@@ -272,10 +316,23 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
             layers.append(hl_clip.with_position(word_pop))
             
     return layers
-def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, website, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir):
+
+def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, website, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir, is_own_listing, logo_path=None):
     rgb_theme = hex_to_rgb(theme_color)
     img_bg = Image.new('RGB', (target_w, target_h), (10, 10, 12)) 
     ImageDraw.Draw(img_bg).rectangle([0, 0, target_w, 6], fill=rgb_theme)
+
+    if logo_path and os.path.exists(logo_path):
+        try:
+            logo_img = Image.open(logo_path).convert("RGBA")
+            logo_max_w, logo_max_h = int(target_w * 0.4), int(target_h * 0.15)
+            logo_img.thumbnail((logo_max_w, logo_max_h), Image.Resampling.LANCZOS)
+            lx = (target_w - logo_img.width) // 2
+            ly = int(target_h * 0.08) # Near the top
+            img_bg.paste(logo_img, (lx, ly), logo_img) # Paste with transparency
+        except Exception as e:
+            print(f"Failed to draw logo on end screen: {e}")
+
     temp_bg = os.path.join(base_dir, f"temp_end_bg_{job_id}.png") 
     img_bg.save(temp_bg)
     
@@ -300,7 +357,12 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
         return ImageClip(path).with_start(start).with_duration(max(0.1, duration - start))
 
     layers, curr_y, fade = [ImageClip(temp_bg).with_duration(duration)], int(target_h * 0.25), 0.5
-    courtesy_text = "Cortesía de:" if language == "Spanish" else "Listing Courtesy of:"
+     # Inside create_end_screen
+    
+    if is_own_listing:
+        courtesy_text = "Presentado por:" if language == "Spanish" else "Presented by:"
+    else:
+        courtesy_text = "Cortesía de:" if language == "Spanish" else "Listing Courtesy of:"
     
     # Store base font sizes instead of pre-rendered fonts
     elements_to_draw = [
@@ -338,7 +400,7 @@ async def generate_edge_audio_async(text, voice, output_path):
                 timings.append((chunk["offset"]/10000000.0, (chunk["offset"]+chunk["duration"])/10000000.0, chunk["text"]))
     return timings
 
-def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, beds, baths, sqft, lang, font_choice, show_price, show_details, voice_model, status_choice, agent_name, brokerage, phone, mls_source, mls_number, target_slide_dur, timing_mode, theme_color, logo_path, base_dir, vo_data=None):
+def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, beds, baths, sqft, lang, font_choice, show_price, show_details, voice_model, status_choice, agent_name, brokerage, phone, mls_source, mls_number, target_slide_dur, timing_mode, theme_color, logo_path, base_dir, vo_data=None, custom_cta=None, show_captions=True):
     dur = target_slide_dur
     vo_clip, vo_timings = None, None
     
@@ -508,7 +570,14 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
 
     # Add overlays (Preserve your existing Title/Caption logic)
     if is_first:
-        layers.extend(create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status_choice, agent_name, brokerage, phone, mls_source, mls_number, theme_color, base_dir))
+        caption_text = scene_data.get('caption', '') if show_captions else ""
+
+        layers.extend(create_title_overlay(
+                job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, 
+                font_choice, show_price, show_details, status_choice, 
+                agent_name, brokerage, phone, mls_source, mls_number, 
+                theme_color, base_dir, custom_cta=custom_cta, logo_path=logo_path
+            ))
     else:
         # Added .get() to safely handle missing captions just in case!
         layers.extend(create_glass_caption(job_id, scene_data.get('caption', ''), dur, tw, th, font_choice, base_dir, vo_timings, theme_color))
@@ -522,6 +591,7 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
     req_dict = req if isinstance(req, dict) else req.model_dump()
     meta, scenes = req_dict.get('meta', {}), req_dict.get('scenes', [])
     logo_file_path = None
+    actual_custom_cta = req_dict.get('custom_cta') or meta.get('custom_cta')
 
     # Expanded Voice Map with Spanish Options
     VOICE_MAP = {
@@ -557,38 +627,63 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
 
         # Generate Audio for all enabled scenes
         vo_tasks, vo_map = [], {}
-        for s in scenes:
-            if s.get('enable_vo') and s.get('caption'):
-                p = os.path.join(base_dir, f"temp_vo_{job_id}_{s['id']}.mp3")
-                vo_tasks.append(generate_edge_audio_async(s['caption'], voice_id, p))
-                vo_map[s['id']] = {"path": p}
-        
-        if vo_tasks:
-            results = await asyncio.gather(*vo_tasks)
-            for sid, res in zip(vo_map.keys(), results):
-                vo_map[sid]["timings"] = res
+        enable_voice = req_dict.get('enable_voice', True) #
 
+        if enable_voice:
+            for s in scenes:
+                if s.get('enable_vo') and s.get('caption'):
+                    p = os.path.join(base_dir, f"temp_vo_{job_id}_{s['id']}.mp3")
+                    vo_tasks.append(generate_edge_audio_async(s['caption'], voice_id, p))
+                    vo_map[s['id']] = {"path": p}
+        
+            if vo_tasks:
+                results = await asyncio.gather(*vo_tasks)
+                for sid, res in zip(vo_map.keys(), results):
+                    vo_map[sid]["timings"] = res
+
+    
         # Build Video Clips using the new animated logic
         for i, scene in enumerate(scenes):
             clips.append(create_animated_clip(
-                job_id, i, scene, tw, th, (i==0), 
-                meta.get('address',''), meta.get('price',''), 
-                meta.get('beds',''), meta.get('baths',''), meta.get('sqft',''), 
-                lang, req_dict.get('font','Montserrat'), 
-                req_dict.get('show_price', True), req_dict.get('show_details', True), 
-                voice_id, req_dict.get('status_choice','Just Listed'), 
-                meta.get('agent',''), meta.get('brokerage',''), meta.get('phone',''), 
-                meta.get('mls_source',''), meta.get('mls_number',''), 
-                3.5, 'Auto', req_dict.get('primary_color','#552448'), 
-                logo_file_path, base_dir, vo_data=vo_map.get(scene['id'])
+                job_id, 
+                i, 
+                scene, 
+                tw, 
+                th, 
+                (i==0), 
+                meta.get('address',''), 
+                meta.get('price',''), 
+                meta.get('beds',''), 
+                meta.get('baths',''), 
+                meta.get('sqft',''), 
+                lang, 
+                req_dict.get('font','Montserrat'), 
+                req_dict.get('show_price', True), 
+                req_dict.get('show_details', True), 
+                voice_id, 
+                req_dict.get('status_choice','Just Listed'), 
+                meta.get('agent',''), 
+                meta.get('brokerage',''), 
+                meta.get('phone',''), 
+                meta.get('mls_source',''), 
+                meta.get('mls_number',''), 
+                3.5, 
+                'Auto', 
+                req_dict.get('primary_color','#552448'), 
+                logo_file_path, 
+                base_dir, 
+                vo_data=vo_map.get(scene['id']), # <--- Notice the parenthesis closes here!
+                custom_cta= actual_custom_cta,
+                show_captions=True    # <--- Safely passed to the main function
             ))
-
         # Add the End Screen
         clips.append(create_end_screen(
             job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), 
             meta.get('phone',''), meta.get('website',''), 5.0, lang, 
             meta.get('mls_source',''), meta.get('mls_number',''), 
-            req_dict.get('font','Montserrat'), req_dict.get('primary_color','#552448'), base_dir
+            req_dict.get('font','Roboto'), req_dict.get('primary_color','#552448'), base_dir, 
+            req_dict.get('is_own_listing', True), # <--- Parenthesis closes here!
+            logo_path=logo_file_path
         ))
 
         # Concatenate and Mix Audio

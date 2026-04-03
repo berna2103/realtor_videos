@@ -40,7 +40,7 @@ class FetchRequest(BaseModel):
     user_id: Optional[str] = None
 
 class MetaDef(BaseModel):
-    address: str; price: str; beds: str; baths: str; sqft: str; agent: str; brokerage: str; phone: str = ""; website: str = ""; mls_source: str; mls_number: str
+    address: str; price: str; beds: str; baths: str; sqft: str; agent: str; brokerage: str; phone: str = ""; website: str = ""; mls_source: str; mls_number: str; custom_cta: Optional[str] = None
 
 class SceneDef(BaseModel):
     id: str
@@ -64,6 +64,10 @@ class RenderRequest(BaseModel):
     primary_color: str = "#552448"
     logo_data: Optional[str] = None
     status_choice: Optional[str] = "Home For Sale"
+    is_own_listing: Optional[bool] = True
+    custom_cta: Optional[str] = None
+    show_captions: Optional[bool] = True  
+    enable_voice: Optional[bool] = True
 
 def background_render_task(job_id: str, req: RenderRequest):
     """ENHANCEMENT: Handles the new async render function."""
