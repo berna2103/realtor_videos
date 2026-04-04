@@ -23,13 +23,12 @@ from moviepy import (
     CompositeAudioClip,
     concatenate_audioclips, 
 )
-from streamlit import status
 
 # Fix for MoviePy 1.0.3 & Pillow 10+
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
-# --- NEW ENHANCEMENT: PROGRESS REPORTING HELPERS ---
+# --- PROGRESS REPORTING HELPERS ---
 def set_progress(job_id, percent):
     """Safely updates the progress in the main thread's jobs dict without circular imports."""
     if 'main' in sys.modules:
@@ -46,7 +45,6 @@ class JobRenderLogger(ProgressBarLogger):
         self.end_progress = end_progress
 
     def bars_callback(self, bar, attr, value, old_value=None):
-        # MoviePy uses 't' to represent the time bar during frame rendering
         if bar == 't':
             bar_data = self.bars.get(bar)
             if bar_data and bar_data.get('total'):
@@ -55,7 +53,6 @@ class JobRenderLogger(ProgressBarLogger):
                     fraction = value / total
                     current_prog = int(self.start_progress + (self.end_progress - self.start_progress) * fraction)
                     set_progress(self.job_id, current_prog)
-# ---------------------------------------------------
 
 # --- ICONS & PATHS ---
 BED_PATHS = [[(0.1, 0.2), (0.1, 0.8)], [(0.1, 0.6), (0.9, 0.6), (0.9, 0.8)], [(0.2, 0.6), (0.2, 0.4), (0.5, 0.4), (0.5, 0.6)]]
@@ -85,16 +82,11 @@ def ease_in_out(t, duration):
     return p * p * (3 - 2 * p)
 
 def draw_text_with_shadow(draw, pos, text, font, fill_color, shadow_color=(0, 0, 0, 200), offset=2):
-    """Helper to draw text with a subtle drop shadow for maximum legibility."""
     x, y = pos
     draw.text((x + offset, y + offset), text, font=font, fill=shadow_color)
     draw.text((x, y), text, font=font, fill=fill_color)
 
 def create_gradient_scrim(width, height, max_alpha=180):
-    """
-    Creates a full-screen subtle dark overlay with a slight bottom emphasis.
-    Keeps image visible while improving white text readability.
-    """
     mask = Image.new('L', (1, height), color=0)
     for y in range(height):
         base_alpha = max_alpha * 0.5
@@ -107,14 +99,43 @@ def create_gradient_scrim(width, height, max_alpha=180):
     scrim.paste(black, (0, 0), mask=mask)
     return scrim
 
-
 def draw_unit_icon(draw, paths, center_x, center_y, scale_factor, color):
     for path in paths:
         scaled_points = [(p[0] * scale_factor + center_x - (scale_factor/2), 
                           p[1] * scale_factor + center_y - (scale_factor/2)) for p in path]
         draw.line(scaled_points, fill=color, width=2)
 
-def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None, show_captions=True):
+# --- GLOBAL CTA GENERATOR ---
+def get_dynamic_cta(status_val, language, custom_cta_val=None):
+    if custom_cta_val and custom_cta_val.strip(): 
+        return custom_cta_val.strip().upper()
+        
+    cta_map = {
+        "English": {
+            "Just Sold": "VIEW OUR SUCCESS STORIES!",
+            "Under Contract": "JOIN BACKUP LIST!",
+            "Coming Soon": "GET EARLY ACCESS!",
+            "Open House": "VISIT US THIS WEEKEND!",
+            "Price Reduced": "NEW PRICE - SEE IT TODAY!",
+            "Just Listed": "BE THE FIRST TO SEE IT!",
+            "Home For Sale": "SCHEDULE A SHOWING!",
+            "default": "SCHEDULE A SHOWING!"
+        },
+        "Spanish": {
+            "Just Sold": "¡MIRA NUESTROS ÉXITOS!",
+            "Under Contract": "¡LISTA DE ESPERA!",
+            "Coming Soon": "¡ACCESO ANTICIPADO!",
+            "Open House": "¡VEN ESTE FIN DE SEMANA!",
+            "Price Reduced": "¡NUEVO PRECIO - VISÍTALO HOY!",
+            "Just Listed": "¡SÉ EL PRIMERO EN VERLO!",
+            "Home For Sale": "¡AGENDA TU CITA!",
+            "default": "¡AGENDA TU CITA!"
+        }
+    }
+    lang_dict = cta_map.get(language, cta_map["English"])
+    return lang_dict.get(status_val, lang_dict["default"])
+
+def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None):
     if not show_details and not show_price: return []
     color_white, color_light_gray = (255, 255, 255, 255), (210, 210, 210, 255)
     color_pill_fill, color_pill_outline = (25, 25, 25, 140), (255, 255, 255, 40)
@@ -123,26 +144,22 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
     scrim = create_gradient_scrim(tw, th)
     overlay_img.paste(scrim, (0, 0), mask=scrim)
     
-    # --- NEW LOGO DRAWING LOGIC ---
     if logo_path and os.path.exists(logo_path):
         try:
             logo_img = Image.open(logo_path).convert("RGBA")
-            # Constrain logo to 40% width or 12% height so it looks professional
             logo_max_w, logo_max_h = int(tw * 0.4), int(th * 0.12)
             logo_img.thumbnail((logo_max_w, logo_max_h), Image.Resampling.LANCZOS)
             lx = (tw - logo_img.width) // 2
-            ly = int(th * 0.05) # Position near the top
-            overlay_img.paste(logo_img, (lx, ly), logo_img) # 3rd arg uses PNG transparency
+            ly = int(th * 0.05) 
+            overlay_img.paste(logo_img, (lx, ly), logo_img) 
         except Exception as e:
             print(f"Failed to draw logo: {e}")
 
     draw = ImageDraw.Draw(overlay_img)
     
-    # Shift text down slightly if a logo is present
     y_status = int(th * 0.22) if logo_path else int(th * 0.20)
     y_price, y_pill, y_addr, y_agent, y_cta = int(th * 0.32), int(th * 0.62), int(th * 0.74), int(th * 0.85), int(th * 0.91)
 
-    # ... [Keep your existing Font Size logic here] ...
     status_font_size = int(th * 0.080)
     f_status = get_font(font_choice, status_font_size, base_dir)
     f_price = get_font(font_choice, int(th * 0.050), base_dir)
@@ -205,36 +222,7 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
         x_pos = (tw - (bbox[2] - bbox[0])) // 2
         draw_text_with_shadow(draw, (x_pos, y_agent), txt, f_agent, (255, 255, 255, 255))
 
-    # --- BUG FIX: Strip empty spaces so CTA doesn't disappear ---
-    def get_dynamic_cta(status_val, language, custom_cta_val=None):
-        if custom_cta_val and custom_cta_val.strip(): 
-            return custom_cta_val.strip().upper()
-            
-        cta_map = {
-            "English": {
-                "Just Sold": "VIEW OUR SUCCESS STORIES!",
-                "Under Contract": "JOIN BACKUP LIST!",
-                "Coming Soon": "GET EARLY ACCESS!",
-                "Open House": "VISIT US THIS WEEKEND!",
-                "Price Reduced": "NEW PRICE - SEE IT TODAY!",
-                "Just Listed": "BE THE FIRST TO SEE IT!",
-                "Home For Sale": "SCHEDULE A SHOWING!",
-                "default": "SCHEDULE A SHOWING!"
-            },
-            "Spanish": {
-                "Just Sold": "¡MIRA NUESTROS ÉXITOS!",
-                "Under Contract": "¡LISTA DE ESPERA!",
-                "Coming Soon": "¡ACCESO ANTICIPADO!",
-                "Open House": "¡VEN ESTE FIN DE SEMANA!",
-                "Price Reduced": "¡NUEVO PRECIO - VISÍTALO HOY!",
-                "Just Listed": "¡SÉ EL PRIMERO EN VERLO!",
-                "Home For Sale": "¡AGENDA TU CITA!",
-                "default": "¡AGENDA TU CITA!"
-            }
-        }
-        lang_dict = cta_map.get(language, cta_map["English"])
-        return lang_dict.get(status_val, lang_dict["default"])
-
+    # --- Use Global CTA logic ---
     cta_text = get_dynamic_cta(status, lang, custom_cta)
 
     bbox = draw.textbbox((0, 0), cta_text, font=f_cta)
@@ -302,29 +290,23 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
     base_temp = os.path.join(base_dir, f"temp_cap_base_{job_id}_{hash_id}.png") 
     bg_overlay.save(base_temp)
     
-    # --- 1. BASE CONTAINER POP-IN (Spring Bounce) ---
     def pop_base(t):
         if t > 0.5: return (0, 0)
         p = t / 0.5
-        # Cinematic Back Ease Out (springs up, slightly overshoots, then settles)
         c1 = 1.70158
         ease = 1 + (c1 + 1) * ((p - 1) ** 3) + c1 * ((p - 1) ** 2)
         y_offset = int(80 * (1 - ease))
         return (0, y_offset)
 
-    # Apply the animation to the base glass layer
     layers = [ImageClip(base_temp).with_duration(duration).with_position(pop_base)]
     
-    # --- 2. HIGHLIGHTED WORD POP-IN (Karaoke Slide) ---
     def word_pop(t):
         if t > 0.15: return (0, 0)
-        # Quick, energetic slide up into place
         p = t / 0.15
         y_offset = int(12 * (1 - p)**2)
         return (0, y_offset)
 
     if timings and len(timings) > 0 and len(word_positions) > 0:
-        # Scale TTS timings to string words to fix mismatches with numbers/symbols
         ratio = len(timings) / len(word_positions)
         
         for w_idx, word_text, x, y in word_positions:
@@ -341,13 +323,13 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
             hl_temp = os.path.join(base_dir, f"temp_hl_{job_id}_{hash_id}_{w_idx}.png") 
             hl_img.save(hl_temp)
             
-            # Apply the animation to each individual word as it appears
             hl_clip = ImageClip(hl_temp).with_start(s).with_duration(min(e + 0.1, duration) - s)
             layers.append(hl_clip.with_position(word_pop))
             
     return layers
 
-def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, website, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir, is_own_listing, logo_path=None):
+# --- UPDATED END SCREEN SIGNATURE ---
+def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, website, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir, is_own_listing, status, custom_cta=None, logo_path=None):
     rgb_theme = hex_to_rgb(theme_color)
     img_bg = Image.new('RGB', (target_w, target_h), (10, 10, 12)) 
     ImageDraw.Draw(img_bg).rectangle([0, 0, target_w, 6], fill=rgb_theme)
@@ -358,8 +340,8 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
             logo_max_w, logo_max_h = int(target_w * 0.4), int(target_h * 0.15)
             logo_img.thumbnail((logo_max_w, logo_max_h), Image.Resampling.LANCZOS)
             lx = (target_w - logo_img.width) // 2
-            ly = int(target_h * 0.08) # Near the top
-            img_bg.paste(logo_img, (lx, ly), logo_img) # Paste with transparency
+            ly = int(target_h * 0.08) 
+            img_bg.paste(logo_img, (lx, ly), logo_img) 
         except Exception as e:
             print(f"Failed to draw logo on end screen: {e}")
 
@@ -374,7 +356,6 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
         draw = ImageDraw.Draw(txt_img)
         bbox = draw.textbbox((0, 0), text, font=font)
         
-        # Dynamic Scaling: Shrink font if text is wider than 90% of screen
         max_width = target_w * 0.90
         while (bbox[2] - bbox[0]) > max_width and size > 12:
             size -= 2
@@ -387,16 +368,17 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
         return ImageClip(path).with_start(start).with_duration(max(0.1, duration - start))
 
     layers, curr_y, fade = [ImageClip(temp_bg).with_duration(duration)], int(target_h * 0.25), 0.5
-     # Inside create_end_screen
     
     if is_own_listing:
         courtesy_text = "Presentado por:" if language == "Spanish" else "Presented by:"
     else:
         courtesy_text = "Cortesía de:" if language == "Spanish" else "Listing Courtesy of:"
     
-    # Store base font sizes instead of pre-rendered fonts
+    # --- GET DYNAMIC CTA ---
+    dynamic_cta = get_dynamic_cta(status, language, custom_cta)
+
     elements_to_draw = [
-        ("¡AGENDA TU CITA!" if language == "Spanish" else "SCHEDULE A SHOWING!", int(target_h * 0.045), (160, 160, 170), "cta"), 
+        (dynamic_cta, int(target_h * 0.045), (160, 160, 170), "cta"), 
         (phone, int(target_h * 0.065), (255, 255, 255), "ph"), 
         (website, int(target_h * 0.035), (200, 200, 255), "web"), 
         (courtesy_text, int(target_h * 0.020), (180, 180, 190), "courtesy"), 
@@ -409,12 +391,12 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
         if clip: layers.append(clip)
         
         if n == "cta": curr_y += 80
-        elif n == "ph": curr_y += 110  # <-- Increased padding after the phone number
+        elif n == "ph": curr_y += 110  # Maintained your padding change here
         elif n == "web": curr_y += 70
         elif n == "courtesy": curr_y += 30
         else: curr_y += 50
         fade += 0.6
-        
+    
     mls_txt = f"Source: {mls_source} | MLS# {mls_number}" if (mls_source or mls_number) else ""
     mls_clip = _text_clip(mls_txt, int(target_h * 0.016), (80, 80, 90), target_h - 60, 2.5, job_id, "mls")
     if mls_clip: layers.append(mls_clip)
@@ -455,7 +437,6 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
         except requests.RequestException as e:
             print(f"Warning: Failed to fetch image {img_url} - {e}")
 
-    # Ensure the randomizer includes the new 3D effects
     all_effects = [
         "zoom_in", "zoom_out", "pan_right", "pan_left", 
         "pan_up", "pan_down", "pan_up_left", "pan_down_right",
@@ -464,14 +445,11 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
     ]
       
     raw_effect = scene_data.get('effect', 'auto')
-    
-    # Sanitize the string (forces "Auto", "Auto ", or "AUTO" to become "auto")
     effect = str(raw_effect).strip().lower() if raw_effect else "auto"
 
     if effect == "auto":
         effect = random.choice(all_effects)
 
-    # 1. BULLETPROOF RESIZING TO FIX DARK CORNERS
     scale_factor = 1.35  
     
     clip = ImageClip(img_path)
@@ -515,7 +493,6 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
             y = int((h_base - th) * progress)
             return base_frame[y:y+th, x:x+tw]
         
-        # --- NEW TRUE 3D PERSPECTIVE PANS ---
         elif effect == "3d_pan_right":
             x_offset = (w_base - tw) * progress
             y_offset = (h_base - th) / 2
@@ -548,7 +525,6 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
             quad = (x0, y0, x1, y1, x2, y2, x3, y3)
             return np.array(base_pil.transform((tw, th), Image.QUAD, quad, resample=Image.Resampling.BICUBIC))
 
-        # --- ZOOM & DRONE EFFECTS ---
         elif effect == "zoom_out":
             zoom = 1.15 - (0.15 * progress)
             new_w, new_h = int(tw / zoom), int(th / zoom)
@@ -586,7 +562,7 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
             cropped = base_frame[y:y+new_h, x:x+new_w]
             pil_img = Image.fromarray(cropped).resize((tw, th), Image.Resampling.LANCZOS)
             return np.array(pil_img)
-        else: # Default Zoom In
+        else: 
             zoom = 1.0 + (0.15 * progress)
             new_w, new_h = int(tw / zoom), int(th / zoom)
             x = int((w_base - new_w) / 2)
@@ -595,12 +571,9 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
             pil_img = Image.fromarray(cropped).resize((tw, th), Image.Resampling.LANCZOS)
             return np.array(pil_img)
 
-    # Completely bypass .fl() and instantiate a fresh VideoClip
     animated_base = VideoClip(make_frame, duration=dur)
     layers = [animated_base]
 
-    
-    # Add overlays
     if is_first:
         layers.extend(create_title_overlay(
                 job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, 
@@ -609,10 +582,9 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
                 theme_color, base_dir, custom_cta=custom_cta, logo_path=logo_path
             ))
     else:
-        # ONLY generate the glass captions if the toggle is ON
         if show_captions:
             layers.extend(create_glass_caption(job_id, scene_data.get('caption', ''), dur, tw, th, font_choice, base_dir, vo_timings, theme_color))
-    
+        
     final = CompositeVideoClip(layers, size=(tw, th)).with_duration(dur)
     if vo_clip: final = final.with_audio(vo_clip)
     return final
@@ -624,8 +596,8 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
     meta, scenes = req_dict.get('meta', {}), req_dict.get('scenes', [])
     logo_file_path = None
     actual_custom_cta = req_dict.get('custom_cta') or meta.get('custom_cta')
+    status_choice = req_dict.get('status_choice', 'Just Listed')
 
-    # Expanded Voice Map with Spanish Options
     VOICE_MAP = {
         "Deep/Luxury": "en-US-EricNeural",
         "Friendly/Fast": "en-US-GuyNeural",
@@ -638,7 +610,6 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
     }
 
     try:
-        # Handle Logo processing
         if req_dict.get('logo_data') and ',' in req_dict.get('logo_data'):
             logo_data = base64.b64decode(req_dict.get('logo_data').split(',', 1)[1])
             logo_file_path = os.path.join(base_dir, f"temp_logo_{job_id}.png")
@@ -646,14 +617,11 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
 
         set_progress(job_id, 5)
 
-        # Set Resolution based on format
         tw, th = (720, 1280) if "Vertical" in req_dict.get('format', 'Vertical') else (1280, 720)
 
-        # Voice Selection Logic
         requested_voice = req_dict.get('voice', 'Professional/Clean')
         lang = req_dict.get('language', 'English')
         
-        # Auto-fallback: If language is Spanish but an English voice is selected, use Jorge
         if lang == "Spanish" and "en-US" in VOICE_MAP.get(requested_voice, "en-US"):
             voice_id = "es-MX-JorgeNeural"
         else:
@@ -661,9 +629,8 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
 
         set_progress(job_id, 10)
 
-        # Generate Audio for all enabled scenes
         vo_tasks, vo_map = [], {}
-        enable_voice = req_dict.get('enable_voice', True) #
+        enable_voice = req_dict.get('enable_voice', True) 
 
         if enable_voice:
             for s in scenes:
@@ -680,7 +647,6 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
 
         set_progress(job_id, 25)
 
-        # Build Video Clips using the new animated logic
         total_scenes = len(scenes)
         for i, scene in enumerate(scenes):
             clips.append(create_animated_clip(
@@ -700,7 +666,7 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
                 req_dict.get('show_price', True), 
                 req_dict.get('show_details', True), 
                 voice_id, 
-                req_dict.get('status_choice','Just Listed'), 
+                status_choice, 
                 meta.get('agent',''), 
                 meta.get('brokerage',''), 
                 meta.get('phone',''), 
@@ -712,25 +678,26 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
                 logo_file_path, 
                 base_dir, 
                 vo_data=vo_map.get(scene['id']), 
-                custom_cta= actual_custom_cta,
-                show_captions=req_dict.get('show_captions', True) # <-- Pulls the boolean from your UI toggle
+                custom_cta=actual_custom_cta,
+                show_captions=req_dict.get('show_captions', True)   
             ))
             if total_scenes > 0:
                 set_progress(job_id, 25 + int(((i + 1) / total_scenes) * 20))
 
-        # Add the End Screen
+        # --- UPDATED END SCREEN CALL ---
         clips.append(create_end_screen(
             job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), 
             meta.get('phone',''), meta.get('website',''), 5.0, lang, 
             meta.get('mls_source',''), meta.get('mls_number',''), 
             req_dict.get('font','Roboto'), req_dict.get('primary_color','#552448'), base_dir, 
             req_dict.get('is_own_listing', True),
+            status=status_choice, 
+            custom_cta=actual_custom_cta,
             logo_path=logo_file_path
         ))
 
         set_progress(job_id, 48)
 
-        # Concatenate and Mix Audio
         final = concatenate_videoclips(clips)
         m_choice = req_dict.get('music')
         if m_choice and m_choice != "none" and m_choice in MUSIC_MAP:
@@ -748,7 +715,6 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
 
         set_progress(job_id, 50)
 
-        # Final Render Hooked Up to Custom Logger
         render_logger = JobRenderLogger(job_id, start_progress=50, end_progress=99)
         final.write_videofile(
             output_path, 
@@ -763,7 +729,6 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
         return True
 
     finally:
-        # Cleanup temp files
         for c in clips: 
             try: c.close()
             except: pass

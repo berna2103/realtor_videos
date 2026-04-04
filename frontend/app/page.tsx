@@ -361,7 +361,7 @@ export default function LandingPage() {
                           alt="Luxury home"
                         />
                       </div>
-                      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80" />
+                      <div className="absolute inset-0 bg-linear-to-b from-black/20 via-transparent to-black/80" />
 
                       {/* Play Button Mock */}
                       <div className="absolute inset-0 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
