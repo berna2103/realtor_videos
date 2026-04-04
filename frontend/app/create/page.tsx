@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import Link from "next/link";
 import {
   Settings,
@@ -130,13 +132,13 @@ const SidebarSettings = ({
   setLanguage,
   user,
   isAuthLoading,
-  showCaptions, 
-  setShowCaptions, 
-  enableVoice, 
-  setEnableVoice,   
-  enableMusic, 
+  showCaptions,
+  setShowCaptions,
+  enableVoice,
+  setEnableVoice,
+  enableMusic,
   setEnableMusic,
-  saveBrandKit
+  saveBrandKit,
 }: any) => (
   <div className="space-y-10">
     <section className="space-y-6">
@@ -241,7 +243,6 @@ const SidebarSettings = ({
         >
           <Settings className="w-4 h-4" /> Save as Default Brand
         </button>
-
       </div>
     </section>
 
@@ -254,25 +255,25 @@ const SidebarSettings = ({
           Master Overrides
         </label>
         <div className="grid grid-cols-3 gap-2">
-          <button 
-            onClick={() => setShowCaptions(!showCaptions)} 
-            className={`py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${showCaptions ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300'}`}
+          <button
+            onClick={() => setShowCaptions(!showCaptions)}
+            className={`py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${showCaptions ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300"}`}
           >
-            Captions {showCaptions ? 'ON' : 'OFF'}
+            Captions {showCaptions ? "ON" : "OFF"}
           </button>
-          
-          <button 
-            onClick={() => setEnableVoice(!enableVoice)} 
-            className={`py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${enableVoice ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300'}`}
+
+          <button
+            onClick={() => setEnableVoice(!enableVoice)}
+            className={`py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${enableVoice ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300"}`}
           >
-            Voice {enableVoice ? 'ON' : 'OFF'}
+            Voice {enableVoice ? "ON" : "OFF"}
           </button>
-          
-          <button 
-            onClick={() => setEnableMusic(!enableMusic)} 
-            className={`py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${enableMusic ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300'}`}
+
+          <button
+            onClick={() => setEnableMusic(!enableMusic)}
+            className={`py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${enableMusic ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300"}`}
           >
-            Music {enableMusic ? 'ON' : 'OFF'}
+            Music {enableMusic ? "ON" : "OFF"}
           </button>
         </div>
       </div>
@@ -381,7 +382,14 @@ const SidebarSettings = ({
   </div>
 );
 
+const isValidZillowUrl = (link: string) => {
+  if (!link) return true; // Don't show error when empty
+  return link.includes("zillow.com") && /([0-9]+)_zpid/.test(link);
+};
+
 export default function CinematicListingApp() {
+  const router = useRouter();
+
   const {
     user,
     email: userEmail,
@@ -405,9 +413,13 @@ export default function CinematicListingApp() {
     mls_number: "",
   });
   const [scenes, setScenes] = useState<Scene[]>([]);
-  
+
   // ENHANCEMENT: Multi-platform Social Drafts
-  const [socialDrafts, setSocialDrafts] = useState({ facebook: "", instagram: "", tiktok: "" });
+  const [socialDrafts, setSocialDrafts] = useState({
+    facebook: "",
+    instagram: "",
+    tiktok: "",
+  });
   const [activeTab, setActiveTab] = useState("instagram");
   const [renderProgress, setRenderProgress] = useState(0);
 
@@ -462,18 +474,18 @@ export default function CinematicListingApp() {
     // ENHANCEMENT: Pre-fill the Brand Kit
     if (savedBrand) {
       const parsed = JSON.parse(savedBrand);
-      setMeta(prev => ({
+      setMeta((prev) => ({
         ...prev,
         agent: parsed.agent || "",
         brokerage: parsed.brokerage || "",
         phone: parsed.phone || "",
-        website: parsed.website || ""
+        website: parsed.website || "",
       }));
       if (parsed.primaryColor) setPrimaryColor(parsed.primaryColor);
       if (parsed.logoData) setLogoData(parsed.logoData);
     }
 
-    if (savedMeta) setMeta(prev => ({ ...prev, ...JSON.parse(savedMeta) }));
+    if (savedMeta) setMeta((prev) => ({ ...prev, ...JSON.parse(savedMeta) }));
     if (savedScenes) setScenes(JSON.parse(savedScenes));
   }, []);
 
@@ -491,7 +503,7 @@ export default function CinematicListingApp() {
       phone: meta.phone,
       website: meta.website,
       primaryColor: primaryColor,
-      logoData: logoData
+      logoData: logoData,
     };
     localStorage.setItem("realtor_brand_kit", JSON.stringify(brandData));
     alert("✅ Brand preferences saved as default!");
@@ -546,7 +558,18 @@ export default function CinematicListingApp() {
     }
   };
 
-  const handleFetchData = async () => {
+  const handleFetchData = async (e?: React.FormEvent) => {
+    // Prevent default if triggered by a form submission
+    if (e) e.preventDefault();
+
+    // 1. ENHANCEMENT: Pre-validate URL before hitting the backend
+    if (!isValidZillowUrl(zillowUrl)) {
+      toast.error(
+        "Invalid Zillow URL. Please ensure it includes the property ID (_zpid).",
+      );
+      return;
+    }
+
     setIsLoading(true);
     try {
       const response = await fetch(`${API_URL}/api/fetch-zillow`, {
@@ -568,12 +591,25 @@ export default function CinematicListingApp() {
 
       setMeta({ ...meta, ...data.meta });
       // ENHANCEMENT: Populate Social Drafts
-      setSocialDrafts(data.socialDrafts || { facebook: data.fbDraft || "", instagram: "", tiktok: "" });
+      setSocialDrafts(
+        data.socialDrafts || {
+          facebook: data.fbDraft || "",
+          instagram: "",
+          tiktok: "",
+        },
+      );
       setScenes(data.scenes || []);
+
+      // 2. ENHANCEMENT: Optional success feedback before moving to step 2
+      toast.success("Property data fetched successfully!");
+
       setStep(2);
     } catch (error: any) {
       console.error("Fetch error:", error);
-      alert(`Fetch failed: ${error.message}`);
+      // 3. ENHANCEMENT: Replaced blocking alert() with non-blocking toast
+      toast.error(
+        error.message || "Failed to fetch property data. Please try again.",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -590,12 +626,13 @@ export default function CinematicListingApp() {
       return;
     }
 
+    // 1. TRIGGER THE IMMERSIVE UI
     setIsRendering(true);
     setRenderProgress(0);
     setRenderMsgIdx(0);
     const msgInterval = setInterval(
       () => setRenderMsgIdx((p) => (p + 1) % RENDER_MESSAGES.length),
-      8000,
+      6000, // Faster message rotation to match faster backend
     );
 
     try {
@@ -636,12 +673,12 @@ export default function CinematicListingApp() {
       const data = await res.json();
       refreshCredits();
 
+      // 2. POLL FOR PROGRESS
       const poll = setInterval(async () => {
         try {
           const sRes = await fetch(`${API_URL}/api/job-status/${data.job_id}`);
           const sData = await sRes.json();
           
-          // ENHANCEMENT: Update rendering progress explicitly 
           if (sData.progress) {
             setRenderProgress(sData.progress);
           }
@@ -652,31 +689,34 @@ export default function CinematicListingApp() {
             setVideoUrl(sData.video_url);
             setIsRendering(false);
             setRenderProgress(0);
+            
+            // 3. SHOW THE "MASTERPIECE READY" SCREEN
             setStep(3);
 
             localStorage.removeItem("draft_meta");
             localStorage.removeItem("draft_scenes");
+            toast.success("Cinematic tour rendered successfully!");
+            
           } else if (sData.status === "failed") {
             clearInterval(poll);
             clearInterval(msgInterval);
             setIsRendering(false);
             setRenderProgress(0);
-            alert(`Render failed: ${sData.error || "Unknown error"}`);
+            toast.error(`Render failed: ${sData.error || "Unknown error"}`);
           }
         } catch (err) {
           console.error("Polling error", err);
         }
-      }, 3000);
+      }, 2000); // Poll slightly faster for smoother progress bar
+
     } catch (e: any) {
       clearInterval(msgInterval);
       setIsRendering(false);
       setRenderProgress(0);
-      alert(
-        e.message ||
-          "Network error. Could not connect to the rendering engine.",
-      );
+      toast.error(e.message || "Network error. Could not connect to the rendering engine.");
     }
   };
+
   const handleForceDownload = async () => {
     if (!videoUrl) return;
     setIsDownloading(true);
@@ -706,6 +746,7 @@ export default function CinematicListingApp() {
     localStorage.removeItem("draft_scenes");
     window.location.reload();
   };
+
   const updateScene = (index: number, field: keyof Scene, value: any) => {
     const newScenes = [...scenes];
     newScenes[index] = { ...newScenes[index], [field]: value };
@@ -916,14 +957,13 @@ export default function CinematicListingApp() {
                 Finishing Your Tour
               </h2>
               <p className="font-serif text-xl font-bold text-slate-600 mb-3 tracking-tight">
-                This may take up to 5 minutes.
+                Applying cinematic effects...
               </p>
               <p className="text-slate-500 font-medium text-lg max-w-sm mx-auto mb-8">
                 {RENDER_MESSAGES[renderMsgIdx]}
               </p>
               
-              {/* ENHANCEMENT: Rendering Progress Bar */}
-              <div className="w-full max-w-md mx-auto mt-8">
+              <div className="w-full max-w-md mx-auto mt-4">
                 <div className="flex justify-between text-xs font-bold text-slate-500 mb-2">
                   <span>Rendering Engine</span>
                   <span>{renderProgress}%</span>
@@ -936,6 +976,17 @@ export default function CinematicListingApp() {
                     <div className="absolute top-0 left-0 bottom-0 right-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]" />
                   </div>
                 </div>
+              </div>
+
+              {/* THE ESCAPE HATCH BUTTON */}
+              <div className="mt-12 text-center animate-in fade-in slide-in-from-bottom-4 duration-700 delay-500">
+                <p className="text-sm text-slate-400 mb-3 font-medium">Need to do something else?</p>
+                <button
+                  onClick={() => router.push('/dashboard')}
+                  className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-full text-sm font-bold shadow-sm hover:bg-slate-50 hover:text-blue-600 transition-all flex items-center gap-2 mx-auto"
+                >
+                  <LayoutDashboard className="w-4 h-4" /> Go to Dashboard (Render in Background)
+                </button>
               </div>
 
             </div>
@@ -955,19 +1006,29 @@ export default function CinematicListingApp() {
                 seconds. Paste the URL below to begin.
               </p>
               <div className="p-3 bg-white border border-slate-200 rounded-[2rem] flex flex-col sm:flex-row gap-3 shadow-2xl shadow-slate-200/60 ring-1 ring-black/5 max-w-3xl mx-auto">
-                <div className="flex-1 flex items-center px-4">
-                  <LinkIcon className="w-5 h-5 text-slate-400 mr-3" />
-                  <input
-                    type="text"
-                    value={zillowUrl}
-                    onChange={(e) => setZillowUrl(e.target.value)}
-                    placeholder="Paste Zillow URL here..."
-                    className="w-full bg-transparent py-4 text-slate-900 outline-none placeholder:text-slate-400 text-lg"
-                  />
+                <div className="flex-1 flex flex-col justify-center px-4 relative">
+                  <div className="flex items-center w-full">
+                    <LinkIcon className="w-5 h-5 text-slate-400 mr-3" />
+                    <input
+                      id="zillowUrl"
+                      type="url"
+                      value={zillowUrl}
+                      onChange={(e) => setZillowUrl(e.target.value)}
+                      placeholder="Paste Zillow URL here..."
+                      className="w-full bg-transparent py-4 text-slate-900 outline-none placeholder:text-slate-400 text-lg"
+                    />
+                  </div>
+                  {/* Inline Error Message */}
+                  {zillowUrl && !isValidZillowUrl(zillowUrl) && (
+                    <span className="text-red-500 text-xs text-left ml-8 pb-1 block -mt-1 font-medium">
+                      Must be a valid Zillow URL containing a property ID.
+                    </span>
+                  )}
                 </div>
                 <button
                   onClick={handleFetchData}
-                  className="bg-blue-600 text-white px-10 py-5 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200 active:scale-[0.98] flex items-center justify-center"
+                  disabled={isLoading}
+                  className="bg-blue-600 text-white px-10 py-5 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200 active:scale-[0.98] flex items-center justify-center disabled:opacity-50"
                 >
                   {isLoading ? (
                     <Loader2 className="animate-spin" />
@@ -1146,37 +1207,47 @@ export default function CinematicListingApp() {
                 {/* ENHANCEMENT: Multi-Platform Social Drafts Panel */}
                 <div className="bg-white border border-slate-200 rounded-2xl p-4 text-left mt-2 shadow-sm">
                   <div className="flex gap-2 mb-3">
-                    {['instagram', 'tiktok', 'facebook'].map(platform => (
-                      <button 
+                    {["instagram", "tiktok", "facebook"].map((platform) => (
+                      <button
                         key={platform}
                         onClick={() => setActiveTab(platform)}
-                        className={`text-[11px] font-bold px-4 py-2 rounded-full capitalize transition-colors ${activeTab === platform ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
+                        className={`text-[11px] font-bold px-4 py-2 rounded-full capitalize transition-colors ${activeTab === platform ? "bg-blue-100 text-blue-700" : "bg-slate-50 text-slate-500 hover:bg-slate-100"}`}
                       >
                         {platform}
                       </button>
                     ))}
                   </div>
-                  <textarea 
+                  <textarea
                     readOnly
-                    value={socialDrafts[activeTab as keyof typeof socialDrafts]} 
+                    value={socialDrafts[activeTab as keyof typeof socialDrafts]}
                     className="w-full h-28 text-sm bg-slate-50 border border-slate-100 rounded-xl p-3 resize-none outline-none text-slate-700 custom-scrollbar"
                   />
                   <div className="flex justify-between items-center mt-3">
-                    <button 
+                    <button
                       onClick={() => {
-                        navigator.clipboard.writeText(socialDrafts[activeTab as keyof typeof socialDrafts]);
-                        alert(`✅ ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} caption copied!`);
+                        navigator.clipboard.writeText(
+                          socialDrafts[activeTab as keyof typeof socialDrafts],
+                        );
+                        alert(
+                          `✅ ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} caption copied!`,
+                        );
                       }}
                       className="text-[11px] text-blue-600 font-bold hover:underline"
                     >
                       Copy Caption
                     </button>
-                    {activeTab === 'facebook' && (
+                    {activeTab === "facebook" && (
                       <button
-                        onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(videoUrl!)}`, "_blank", "width=600,height=500")}
+                        onClick={() =>
+                          window.open(
+                            `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(videoUrl!)}`,
+                            "_blank",
+                            "width=600,height=500",
+                          )
+                        }
                         className="text-[11px] bg-[#1877F2] text-white px-3 py-1.5 rounded-lg font-bold hover:bg-[#166fe5] transition-colors flex items-center gap-1.5"
                       >
-                         <Share2 className="w-3 h-3" /> Post to FB
+                        <Share2 className="w-3 h-3" /> Post to FB
                       </button>
                     )}
                   </div>

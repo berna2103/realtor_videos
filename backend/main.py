@@ -70,9 +70,10 @@ class RenderRequest(BaseModel):
     enable_voice: Optional[bool] = True
 
 def background_render_task(job_id: str, req: RenderRequest):
-    """ENHANCEMENT: Handles the new async render function."""
+    """ENHANCEMENT: Handles the new async render function and cleans up disk space."""
     try:
         jobs[job_id]["status"] = "rendering"
+        jobs[job_id]["progress"] = 2
         output_filename = f"listing_{job_id}.mp4"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
 
@@ -82,22 +83,46 @@ def background_render_task(job_id: str, req: RenderRequest):
         success = loop.run_until_complete(render_cinematic_video(job_id, req, output_path, BASE_DIR))
 
         if success:
+            # ENHANCEMENT: Explicitly show upload phase so the UI doesn't look frozen
+            jobs[job_id]["progress"] = 99 
             final_video_url = f"{get_base_url()}/outputs/{output_filename}"
+            
             if supabase:
                 try:
                     with open(output_path, "rb") as f:
-                        supabase.storage.from_("listings").upload(path=output_filename, file=f.read(), file_options={"content-type": "video/mp4"})
+                        supabase.storage.from_("listings").upload(
+                            path=output_filename, 
+                            file=f.read(), 
+                            file_options={"content-type": "video/mp4"}
+                        )
                     final_video_url = supabase.storage.from_("listings").get_public_url(output_filename)
+                    
                     if req.user_id:
-                        supabase.table("user_videos").insert({"user_id": req.user_id, "video_url": final_video_url, "property_address": req.meta.address if req.meta else "New Listing"}).execute()
-                except Exception as e: print(f"Supabase upload failed: {e}")
+                        supabase.table("user_videos").insert({
+                            "user_id": req.user_id, 
+                            "video_url": final_video_url, 
+                            "property_address": req.meta.address if req.meta else "New Listing"
+                        }).execute()
+                    
+                    # ENHANCEMENT: Prevent "Disk Full" server crashes by deleting local file after cloud upload
+                    try:
+                        if os.path.exists(output_path):
+                            os.remove(output_path)
+                            print(f"Cleaned up local file: {output_filename}")
+                    except Exception as cleanup_error:
+                        print(f"Could not remove local file: {cleanup_error}")
+
+                except Exception as e: 
+                    print(f"Supabase upload failed: {e}")
+                    # If Supabase fails, it will gracefully fallback to serving the local URL
 
             jobs[job_id].update({"status": "completed", "progress": 100, "video_url": final_video_url})
+            
     except Exception as e:
         print(f"\n--- FATAL ERROR RENDERING JOB {job_id} ---")
         traceback.print_exc()  
-        jobs[job_id].update({"status": "failed", "error": str(e)})
-
+        jobs[job_id].update({"status": "failed", "error": str(e), "progress": 0})
+            
 @app.post("/api/fetch-zillow")
 async def fetch_zillow(req: FetchRequest):
     if supabase and req.user_id:
