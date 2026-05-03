@@ -5,11 +5,13 @@ import hashlib
 import base64
 import glob
 import io
-import edge_tts
-import numpy as np
 import requests
 import random
 import math
+import numpy as np
+import re
+import soundfile as sf
+from kokoro import KPipeline
 
 from PIL import Image, ImageDraw, ImageFont
 from proglog import ProgressBarLogger
@@ -24,11 +26,27 @@ from moviepy import (
     concatenate_audioclips, 
 )
 
+# Initialize the pipeline globally so the model stays in memory across requests.
+pipeline = KPipeline(lang_code='a')
+
 # Fix for MoviePy 1.0.3 & Pillow 10+
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
 # --- PROGRESS REPORTING HELPERS ---
+def normalize_tts_text(text):
+    """Expands common real estate abbreviations so the TTS pronounces them correctly."""
+    if not text: return text
+    
+    # \b ensures we only replace the exact word, so we don't accidentally turn "left" into "lefeet"
+    text = re.sub(r'\bsqft\b', 'square feet', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bsq\.?\s*ft\.?\b', 'square feet', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bft\.?\b', 'feet', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bbd\.?\b', 'bedroom', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bba\.?\b', 'bathroom', text, flags=re.IGNORECASE)
+    
+    return text
+
 def set_progress(job_id, percent):
     """Safely updates the progress in the main thread's jobs dict without circular imports."""
     if 'main' in sys.modules:
@@ -105,6 +123,26 @@ def draw_unit_icon(draw, paths, center_x, center_y, scale_factor, color):
                           p[1] * scale_factor + center_y - (scale_factor/2)) for p in path]
         draw.line(scaled_points, fill=color, width=2)
 
+def format_address(full_addr, hide_exact=False):
+    """
+    Extracts City, State if hide_exact is True; otherwise returns full address.
+    Assumes format: '123 Main St, Chicago, IL 60617'
+    """
+    if not hide_exact or not full_addr:
+        return full_addr
+    
+    try:
+        parts = [p.strip() for p in full_addr.split(',')]
+        if len(parts) >= 3:
+            # Returns 'Chicago, IL'
+            city = parts[-2]
+            state_zip = parts[-1].split()
+            state = state_zip[0] if state_zip else ""
+            return f"{city}, {state}"
+    except Exception:
+        pass
+    return full_addr
+
 # --- GLOBAL CTA GENERATOR ---
 def get_dynamic_cta(status_val, language, custom_cta_val=None):
     if custom_cta_val and custom_cta_val.strip(): 
@@ -135,7 +173,7 @@ def get_dynamic_cta(status_val, language, custom_cta_val=None):
     lang_dict = cta_map.get(language, cta_map["English"])
     return lang_dict.get(status_val, lang_dict["default"])
 
-def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None):
+def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None, hide_exact_addr=False):
     if not show_details and not show_price: return []
     color_white, color_light_gray = (255, 255, 255, 255), (210, 210, 210, 255)
     color_pill_fill, color_pill_outline = (25, 25, 25, 140), (255, 255, 255, 40)
@@ -158,8 +196,8 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
     draw = ImageDraw.Draw(overlay_img)
     
     y_status = int(th * 0.22) if logo_path else int(th * 0.20)
-    y_price, y_pill, y_addr, y_agent, y_cta = int(th * 0.32), int(th * 0.62), int(th * 0.74), int(th * 0.85), int(th * 0.91)
-
+    # Shifted upward to stay out of the TikTok/Reels UI danger zone
+    y_price, y_pill, y_addr, y_agent, y_cta = int(th * 0.32), int(th * 0.55), int(th * 0.64), int(th * 0.71), int(th * 0.78)
     status_font_size = int(th * 0.080)
     f_status = get_font(font_choice, status_font_size, base_dir)
     f_price = get_font(font_choice, int(th * 0.050), base_dir)
@@ -211,10 +249,12 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
                 draw.text((curr_x, py + (pill_h - (txt_bbox[3] - txt_bbox[1])) // 2 - int(th * 0.005)), txt_val, font=f_pill, fill=color_light_gray)
                 curr_x += (block_w - icon_draw_scale - gap_icon_text) + gap_items
 
-    if addr:
-        bbox = draw.textbbox((0, 0), addr, font=f_addr)
+    display_addr = format_address(addr, hide_exact_addr)
+
+    if display_addr:
+        bbox = draw.textbbox((0, 0), display_addr, font=f_addr)
         x_pos = (tw - (bbox[2] - bbox[0])) // 2
-        draw_text_with_shadow(draw, (x_pos, y_addr), addr, f_addr, color_light_gray)
+        draw_text_with_shadow(draw, (x_pos, y_addr), display_addr, f_addr, color_light_gray)
 
     if phone:
         txt = f"Agent Contact: {phone}"
@@ -247,87 +287,91 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
     return [ImageClip(temp).with_duration(dur)]
 
 def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice, base_dir, timings=None, theme_color="#552448"):
-    if not text: return []
+    """Displays only the active spoken word, with strict anti-overlap clamping."""
+    if not text or not timings: return []
+    
+    # NORMALIZE TEXT FIRST: 
+    # This ensures the visual words exactly match the audio timestamps we generated!
+    text = normalize_tts_text(text)
     
     rgb_highlight = hex_to_rgb(theme_color) + (255,)
-    font = get_font(font_choice, int(target_h * 0.027), base_dir)
-    text = str(text).upper().strip()
-    words = text.split()
-    draw_t = ImageDraw.Draw(Image.new('RGBA', (1,1)))
-    space_w = int(draw_t.textlength(" ", font=font))
+    font_size = int(target_h * 0.045) 
+    font = get_font(font_choice, font_size, base_dir)
+    words = str(text).upper().strip().split()
     
-    lines_data, current_line_words, current_line_w, max_h_line = [], [], 0, 0
-    for word in words:
-        bbox = draw_t.textbbox((0,0), word, font=font)
-        w, h = bbox[2]-bbox[0], bbox[3]-bbox[1]
-        if current_line_words and (current_line_w + space_w + w) > (target_w * 0.8):
-            lines_data.append((current_line_w, max_h_line, current_line_words))
-            current_line_words, current_line_w, max_h_line = [(word, w, h)], w, h
-        else:
-            current_line_w += (space_w if current_line_words else 0) + w
-            max_h_line = max(max_h_line, h)
-            current_line_words.append((word, w, h))
-    if current_line_words: lines_data.append((current_line_w, max_h_line, current_line_words))
+    y_pos = int(target_h * 0.85) 
+    
+    # PHASE 1: Accurately match timestamps to words
+    matched_words = []
+    t_idx = 0
+    for w_idx, word_text in enumerate(words):
+        clean_visual = "".join(c for c in word_text.lower() if c.isalnum())
+        if not clean_visual: continue
 
-    bw, bh = int(max([ld[0] for ld in lines_data]) + (target_w * 0.05)), int(sum([ld[1] for ld in lines_data]) + (len(lines_data) * target_h * 0.01) + (target_w * 0.05))
-    x1, y1 = (target_w - bw) // 2, int(target_h * 0.85)
-    
-    bg_overlay = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
-    draw_bg = ImageDraw.Draw(bg_overlay)
-    draw_bg.rounded_rectangle([x1, y1, x1+bw, y1+bh], radius=15, fill=(40, 40, 40, 220), outline=(255, 255, 255, 60), width=2)
-    
-    word_positions, curr_y, word_idx = [], y1 + (target_w * 0.025), 0
-    for line_w, line_h, words_in_line in lines_data:
-        curr_x = (target_w - line_w) // 2
-        for word_text, w, h in words_in_line:
-            word_positions.append((word_idx, word_text, curr_x, curr_y))
-            draw_bg.text((curr_x, curr_y), word_text, font=font, fill=(255, 255, 255))
-            curr_x += w + space_w
-            word_idx += 1
-        curr_y += line_h + (target_h * 0.01)
-
-    hash_id = hashlib.md5(text.encode()).hexdigest()[:8]
-    base_temp = os.path.join(base_dir, f"temp_cap_base_{job_id}_{hash_id}.png") 
-    bg_overlay.save(base_temp)
-    
-    def pop_base(t):
-        if t > 0.5: return (0, 0)
-        p = t / 0.5
-        c1 = 1.70158
-        ease = 1 + (c1 + 1) * ((p - 1) ** 3) + c1 * ((p - 1) ** 2)
-        y_offset = int(80 * (1 - ease))
-        return (0, y_offset)
-
-    layers = [ImageClip(base_temp).with_duration(duration).with_position(pop_base)]
-    
-    def word_pop(t):
-        if t > 0.15: return (0, 0)
-        p = t / 0.15
-        y_offset = int(12 * (1 - p)**2)
-        return (0, y_offset)
-
-    if timings and len(timings) > 0 and len(word_positions) > 0:
-        ratio = len(timings) / len(word_positions)
+        s_time, e_time = None, None
+        spoken_acc = ""
         
-        for w_idx, word_text, x, y in word_positions:
-            start_idx = int(w_idx * ratio)
-            end_idx = min(int((w_idx + 1) * ratio - 0.001), len(timings) - 1)
+        while t_idx < len(timings):
+            ts, te, t_word = timings[t_idx]
+            clean_t = "".join(c for c in t_word.lower() if c.isalnum())
             
-            s = timings[start_idx][0]
-            e = timings[end_idx][1]
+            if s_time is None: s_time = ts
+            e_time = te
+            spoken_acc += clean_t
+            t_idx += 1
             
-            if s >= duration: continue
-            
-            hl_img = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
-            ImageDraw.Draw(hl_img).text((x, y), word_text, font=font, fill=rgb_highlight)
-            hl_temp = os.path.join(base_dir, f"temp_hl_{job_id}_{hash_id}_{w_idx}.png") 
-            hl_img.save(hl_temp)
-            
-            hl_clip = ImageClip(hl_temp).with_start(s).with_duration(min(e + 0.1, duration) - s)
-            layers.append(hl_clip.with_position(word_pop))
-            
-    return layers
+            # Advance when the spoken tokens have covered the visual word
+            if clean_visual in spoken_acc or spoken_acc in clean_visual:
+                break
+                
+        if s_time is not None and s_time < duration:
+            matched_words.append({
+                "idx": w_idx, 
+                "text": word_text, 
+                "start": s_time, 
+                "end": e_time
+            })
 
+    # PHASE 2: Build clips with STRICT anti-overlap limits
+    layers = []
+    for i in range(len(matched_words)):
+        curr = matched_words[i]
+        
+        # Determine the absolute max end time (start of next word, or total duration)
+        next_start = matched_words[i+1]['start'] if i + 1 < len(matched_words) else duration
+        
+        # Add a tiny pad (0.05s) for readability, but CLAMP IT so it NEVER overlaps the next word
+        adjusted_end = min(curr['end'] + 0.05, next_start, duration)
+        
+        # Failsafe: if timestamps are identical/broken, skip rendering to avoid crash
+        if curr['start'] >= adjusted_end:
+            continue
+
+        hl_img = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
+        draw = ImageDraw.Draw(hl_img)
+        
+        # Calculate width to perfectly center this specific word
+        bbox = draw.textbbox((0, 0), curr['text'], font=font)
+        text_w = bbox[2] - bbox[0]
+        x_pos = (target_w - text_w) // 2
+        
+        # Draw the colored word with a drop shadow for readability
+        draw_text_with_shadow(draw, (x_pos, y_pos), curr['text'], font, rgb_highlight)
+        
+        hl_temp = os.path.join(base_dir, f"temp_hl_{job_id}_word_{curr['idx']}.png")
+        hl_img.save(hl_temp)
+        
+        hl_clip = ImageClip(hl_temp).with_start(curr['start']).with_duration(adjusted_end - curr['start'])
+        
+        # Smooth pop-up animation
+        # def word_pop(t):
+        #     if t > 0.15: return (0, 0)
+        #     y_offset = int(10 * (1 - (t / 0.15)**2))
+        #     return (0, y_offset)
+        
+        layers.append(hl_clip)
+        
+    return layers
 # --- UPDATED END SCREEN SIGNATURE ---
 def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, website, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir, is_own_listing, status, custom_cta=None, logo_path=None):
     rgb_theme = hex_to_rgb(theme_color)
@@ -391,28 +435,84 @@ def create_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, 
         if clip: layers.append(clip)
         
         if n == "cta": curr_y += 80
-        elif n == "ph": curr_y += 110  # Maintained your padding change here
+        elif n == "ph": curr_y += 110 
         elif n == "web": curr_y += 70
         elif n == "courtesy": curr_y += 30
         else: curr_y += 50
         fade += 0.6
     
     mls_txt = f"Source: {mls_source} | MLS# {mls_number}" if (mls_source or mls_number) else ""
-    mls_clip = _text_clip(mls_txt, int(target_h * 0.016), (80, 80, 90), target_h - 60, 2.5, job_id, "mls")
+    # Changed Y-coordinate from target_h - 60 to target_h * 0.88
+    mls_clip = _text_clip(mls_txt, int(target_h * 0.016), (80, 80, 90), int(target_h * 0.88), 2.5, job_id, "mls")
+    
     if mls_clip: layers.append(mls_clip)
     
     return CompositeVideoClip(layers, size=(target_w, target_h)).with_duration(duration)
 
-async def generate_edge_audio_async(text, voice, output_path):
-    timings = []
-    communicate = edge_tts.Communicate(text, voice)
-    with open(output_path, "wb") as file:
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio": file.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
-                timings.append((chunk["offset"]/10000000.0, (chunk["offset"]+chunk["duration"])/10000000.0, chunk["text"]))
-    return timings
+async def generate_kokoro_audio_async(text, voice, output_path):
+    def _run_kokoro():
+        timings = []
+        audio_chunks = []
+        clean_text = normalize_tts_text(text)
+        
+        # Kokoro breaks longer text into manageable chunks based on punctuation
+        generator = pipeline(clean_text, voice=voice, speed=1, split_pattern=r'\n+')
+        
+        chunk_offset_seconds = 0.0
+        sample_rate = 24000 # Kokoro's native sample rate
+        
+        for result in generator:
+            audio_chunks.append(result.audio)
+            
+            current_text = []
+            current_start = None
+            
+            # Extract the native timestamps exposed by Kokoro's tokens
+            tokens = getattr(result, "tokens", [])
+            for token in tokens:
+                t_text = getattr(token, "text", "")
+                if not t_text: continue
+                
+                start_ts = getattr(token, "start_ts", None)
+                end_ts = getattr(token, "end_ts", None)
+                
+                if current_start is None and start_ts is not None:
+                    current_start = chunk_offset_seconds + float(start_ts)
+                    
+                current_text.append(t_text)
+                
+                # If the token has whitespace, the word is complete. Log the timing.
+                if getattr(token, "whitespace", ""):
+                    word_text = "".join(current_text).strip()
+                    if word_text:
+                        word_end = chunk_offset_seconds + float(end_ts) if end_ts else current_start + 0.5
+                        timings.append((current_start, word_end, word_text))
+                    # Reset for the next word
+                    current_text = []
+                    current_start = None
+            
+            # --- FIX FOR MISSING LAST WORD ---
+            # If the final word had no trailing space, it gets stuck. We flush it here:
+            if current_text and current_start is not None:
+                word_text = "".join(current_text).strip()
+                if word_text:
+                    word_end = chunk_offset_seconds + float(end_ts) if end_ts else current_start + 0.5
+                    timings.append((current_start, word_end, word_text))
+                current_text = []
+                current_start = None
+                    
+            # Advance the offset for the next spoken chunk
+            chunk_offset_seconds += len(result.audio) / sample_rate
+            
+        # Merge all audio chunks and save
+        if audio_chunks:
+            final_audio = np.concatenate(audio_chunks)
+            sf.write(output_path, final_audio, sample_rate)
+            
+        return timings
 
+    # Run the heavy inference in a background thread to prevent blocking
+    return await asyncio.to_thread(_run_kokoro)
 def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, beds, baths, sqft, lang, font_choice, show_price, show_details, voice_model, status_choice, agent_name, brokerage, phone, mls_source, mls_number, target_slide_dur, timing_mode, theme_color, logo_path, base_dir, vo_data=None, custom_cta=None, show_captions=True):
     dur = target_slide_dur
     vo_clip, vo_timings = None, None
@@ -598,15 +698,16 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
     actual_custom_cta = req_dict.get('custom_cta') or meta.get('custom_cta')
     status_choice = req_dict.get('status_choice', 'Just Listed')
 
+    # Updated to Kokoro's native IDs
     VOICE_MAP = {
-        "Deep/Luxury": "en-US-EricNeural",
-        "Friendly/Fast": "en-US-GuyNeural",
-        "Professional/Clean": "en-US-AndrewNeural",
-        "Female/Warm": "en-US-AvaNeural",
-        "Spanish/Mexico-Male": "es-MX-JorgeNeural",
-        "Spanish/Mexico-Female": "es-MX-DaliaNeural",
-        "Spanish/Spain-Male": "es-ES-AlvaroNeural",
-        "Spanish/US-Male": "es-US-AlonsoNeural"
+        "Deep/Luxury": "am_onyx",         
+        "Friendly/Fast": "am_michael",    
+        "Professional/Clean": "am_adam",  
+        "Female/Warm": "af_bella",        
+        "Spanish/Mexico-Male": "am_adam", 
+        "Spanish/Mexico-Female": "af_bella",
+        "Spanish/Spain-Male": "am_adam",
+        "Spanish/US-Male": "am_adam"
     }
 
     try:
@@ -622,10 +723,8 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
         requested_voice = req_dict.get('voice', 'Professional/Clean')
         lang = req_dict.get('language', 'English')
         
-        if lang == "Spanish" and "en-US" in VOICE_MAP.get(requested_voice, "en-US"):
-            voice_id = "es-MX-JorgeNeural"
-        else:
-            voice_id = VOICE_MAP.get(requested_voice, "en-US-AndrewNeural")
+        # Fallback to am_adam if voice is not found
+        voice_id = VOICE_MAP.get(requested_voice, "am_adam")
 
         set_progress(job_id, 10)
 
@@ -635,8 +734,9 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
         if enable_voice:
             for s in scenes:
                 if s.get('enable_vo') and s.get('caption'):
-                    p = os.path.join(base_dir, f"temp_vo_{job_id}_{s['id']}.mp3")
-                    vo_tasks.append(generate_edge_audio_async(s['caption'], voice_id, p))
+                    # Saving as .wav to be compatible with soundfile and Kokoro output
+                    p = os.path.join(base_dir, f"temp_vo_{job_id}_{s['id']}.wav")
+                    vo_tasks.append(generate_kokoro_audio_async(s['caption'], voice_id, p))
                     vo_map[s['id']] = {"path": p}
         
             if vo_tasks:
@@ -684,7 +784,6 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
             if total_scenes > 0:
                 set_progress(job_id, 25 + int(((i + 1) / total_scenes) * 20))
 
-        # --- UPDATED END SCREEN CALL ---
         clips.append(create_end_screen(
             job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), 
             meta.get('phone',''), meta.get('website',''), 5.0, lang, 
@@ -699,10 +798,26 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
         set_progress(job_id, 48)
 
         final = concatenate_videoclips(clips)
+        
+        # --- FLEXIBLE DYNAMIC MUSIC FETCHING ---
         m_choice = req_dict.get('music')
-        if m_choice and m_choice != "none" and m_choice in MUSIC_MAP:
-            m_file = os.path.join(base_dir, MUSIC_MAP[m_choice])
-            if os.path.exists(m_file):
+        if m_choice and m_choice != "none":
+            m_file = None
+            
+            if m_choice in MUSIC_MAP:
+                m_file = os.path.join(base_dir, MUSIC_MAP[m_choice])
+            elif m_choice.startswith("http"):
+                m_file = os.path.join(base_dir, f"temp_music_{job_id}.mp3")
+                try:
+                    r = requests.get(m_choice, timeout=15)
+                    if r.status_code == 200:
+                        with open(m_file, 'wb') as f: 
+                            f.write(r.content)
+                except requests.RequestException as e:
+                    print(f"Warning: Failed to fetch music {m_choice} - {e}")
+                    m_file = None
+
+            if m_file and os.path.exists(m_file):
                 bg = AudioFileClip(m_file)
                 if bg.duration < final.duration: 
                     bg = concatenate_audioclips([bg] * (int(final.duration / bg.duration) + 1))

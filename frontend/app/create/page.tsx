@@ -202,12 +202,12 @@ const SidebarSettings = ({
           />
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-3 ">
           <span className="text-[11px] text-slate-500 font-bold uppercase ml-1 block">
             Brokerage Logo
           </span>
           {logoData ? (
-            <div className="relative group rounded-2xl overflow-hidden bg-white border border-slate-200 p-6 shadow-md flex items-center justify-center min-h-[100px] transition-all">
+            <div className="relative group rounded-2xl overflow-hidden bg-slate-200 border border-slate-200 p-6 shadow-md flex items-center justify-center min-h-[100px] transition-all">
               <img
                 src={logoData}
                 className="max-h-14 w-auto object-contain"
@@ -655,6 +655,7 @@ export default function CinematicListingApp() {
           custom_cta: meta.custom_cta || null,
           show_captions: showCaptions,
           enable_voice: enableVoice,
+           
         }),
       });
 
