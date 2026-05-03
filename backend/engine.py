@@ -77,7 +77,7 @@ BED_PATHS = [[(0.1, 0.2), (0.1, 0.8)], [(0.1, 0.6), (0.9, 0.6), (0.9, 0.8)], [(0
 BATH_PATHS = [[(0.1, 0.5), (0.1, 0.8), (0.9, 0.8), (0.9, 0.5), (0.1, 0.5)], [(0.2, 0.8), (0.2, 0.9)], [(0.8, 0.8), (0.8, 0.9)], [(0.8, 0.5), (0.8, 0.1), (0.6, 0.1), (0.6, 0.2)]]
 SQFT_PATHS = [[(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8), (0.2, 0.2)]]
 
-MUSIC_MAP = {"Upbeat": "music/Upbeat.mp3", "Luxury": "music/Luxury.mp3", "Motivation": "music/Motivation.mp3"}
+MUSIC_MAP = {"Upbeat": "music/upbeat.mp3", "Luxury": "music/luxury.mp3", "Motivation": "music/Motivation.mp3"}
 
 # --- HELPER FUNCTIONS ---
 def hex_to_rgb(hex_color):
