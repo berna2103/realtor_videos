@@ -39,14 +39,15 @@ const STRIPE_PRICE_ID_5_CREDITS =
 
 // Expanded Voice Options to include Spanish High-Quality Neural Voices
 const VOICE_OPTIONS = [
-  { label: "Professional (Male)", value: "Professional/Clean" },
-  { label: "Luxury (Male)", value: "Deep/Luxury" },
-  { label: "Friendly (Male)", value: "Friendly/Fast" },
-  { label: "Warm (Female)", value: "Female/Warm" },
-  { label: "Español MX (Hombre)", value: "Spanish/Mexico-Male" },
-  { label: "Español MX (Mujer)", value: "Spanish/Mexico-Female" },
-  { label: "Español ES (Hombre)", value: "Spanish/Spain-Male" },
-  { label: "Español US (Hombre)", value: "Spanish/US-Male" },
+  // English Voices
+  { label: "Bella (Crisp & Professional)", value: "English-US-Bella" },
+  { label: "Chloe (Warm & Inviting)", value: "English-US-Heart" },
+  { label: "Michael (Upbeat & Friendly)", value: "English-US-Michael" },
+  { label: "Marcus (Deep & Cinematic)", value: "English-US-Fenrir" },
+  
+  // Spanish Voices
+  { label: "Elena (Español - Amable)", value: "Spanish-Dora" },
+  { label: "Alejandro (Español - Profesional)", value: "Spanish-Alex" },
 ];
 
 const EFFECT_OPTIONS = [
@@ -358,9 +359,11 @@ const SidebarSettings = ({
             className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-900 font-medium outline-none"
           >
             <option value="none">No Music</option>
-            <option value="Upbeat">Upbeat</option>
-            <option value="Luxury">Luxury</option>
-            <option value="Motivation">Motivation</option>
+            <option value="top1">Upbeat</option>
+            <option value="top2">Luxury</option>
+            <option value="top3">Motivation</option>
+            <option value="top4">Inspiration</option>
+            <option value="top5">Low Beat</option>
           </select>
         </div>
       </div>

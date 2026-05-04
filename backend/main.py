@@ -59,7 +59,7 @@ class RenderRequest(BaseModel):
     format: Optional[str] = "Vertical (1080x1920)"
     language: Optional[str] = "English"
     voice: Optional[str] = "Professional/Clean"
-    font: Optional[str] = "Montserrat"
+    font: Optional[str] = "Inter"
     music: Optional[str] = "none"
     primary_color: str = "#552448"
     logo_data: Optional[str] = None

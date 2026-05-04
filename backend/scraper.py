@@ -105,81 +105,113 @@ def analyze_scenes_batch(image_paths: List[str], language: str, meta_data: dict)
     images = [PIL.Image.open(path) for path in image_paths]
     
     prompt = f"""
-You are an award-winning real estate video director and compliant property marketing specialist.
+        You are an award-winning real estate video director and compliant property marketing specialist.
 
-Analyze ALL provided images AND the MLS property description below to understand the home:
+        Analyze ALL provided images AND the MLS property description below to understand the home.
 
-ADDRESS:
-{meta_data.get('address')}
+        ADDRESS:
+        {meta_data.get('address')}
 
-MLS DESCRIPTION (SOURCE OF TRUTH):
-\"\"\"
-{meta_data.get('description')}
-\"\"\"
+        MLS DESCRIPTION (SOURCE OF TRUTH):
+        \"\"\"
+        {meta_data.get('description')}
+        \"\"\"
 
-GOAL:
-Create a cinematic walkthrough that feels like a buyer experiencing the home in real time—not just viewing it.
+        GOAL:
+        Create a cinematic walkthrough that feels like a buyer experiencing the home in real time—not just viewing it.
 
-The captions should guide the viewer naturally from space to space, like an in-person showing.
+        The captions should guide the viewer naturally from space to space, like an in-person showing.
 
---------------------------------------------------
-LANGUAGE SETTING (CRITICAL):
-- You MUST write all captions in {language}.
+        --------------------------------------------------
+        LANGUAGE SETTING (CRITICAL):
+        - You MUST write all captions in {language}
+        - ALL output must be in {language}
+        - Do NOT mix languages
 
---------------------------------------------------
-TRUTH & COMPLIANCE RULES (CRITICAL):
-- ONLY mention features explicitly stated in the MLS description OR clearly visible in images
-- If a feature is not stated AND not clearly visible, DO NOT mention it
-- NEVER assume materials (e.g., hardwood, quartz, marble) unless explicitly confirmed
-- NEVER infer upgrades, condition, or quality not stated
-- Stay compliant with Fair Housing laws:
-  - Do NOT reference people, demographics, families, income, religion, or protected classes
-  - Do NOT use exclusionary or biased language
-- Avoid prohibited terms: "perfect", "best", "guaranteed", "dream home"
+        --------------------------------------------------
+        TRUTH & COMPLIANCE RULES (CRITICAL):
+        - ONLY mention features explicitly stated in the MLS description OR clearly visible in images
+        - "Clearly visible" = unambiguous and directly identifiable (e.g., stove, island, bathtub, windows)
+        - If uncertain, DO NOT mention it
+        - NEVER assume materials (e.g., hardwood, quartz, marble) unless explicitly confirmed
+        - NEVER infer upgrades, condition, or quality not stated
+        - Stay compliant with Fair Housing laws:
+          - Do NOT reference people, demographics, families, income, religion, or protected classes
+          - Do NOT use exclusionary or biased language
+        - Avoid prohibited terms: "perfect", "best", "guaranteed", "dream home"
 
---------------------------------------------------
-VOICE & TONE (CRITICAL):
-- Write like you're guiding a buyer in person
-- Use inviting, experiential language (what can they do/feel here)
-- Use natural second-person phrasing when appropriate (e.g., "step into", "unwind in")
-- Focus on lifestyle, not just features
+        --------------------------------------------------
+        VOICE & TONE (CRITICAL):
+        - Write like you're guiding a buyer in person
+        - Use inviting, experiential language (what can they do/feel here)
+        - Use natural second-person phrasing when appropriate (e.g., "step into", "unwind in")
+        - Focus on lifestyle anchored to visible features
 
-STYLE RULES:
-- Use subtle action verbs: step into, unwind, gather, enjoy, relax, host
-- Avoid robotic or repetitive phrasing
-- Do NOT start consecutive captions with the same word
-- Keep tone natural—not overly poetic or exaggerated
+        STYLE RULES:
+        - Each caption must reference at least ONE tangible, visible element
+        - Avoid vague descriptors (e.g., "nice", "beautiful", "inviting") unless tied to a feature
+        - Use subtle action verbs: step into, unwind, gather, enjoy, relax, host
+        - Avoid robotic or repetitive phrasing
+        - Do NOT start consecutive captions with the same word
+        - Avoid repeating the same verbs across consecutive captions
+        - Keep tone natural—not overly poetic or exaggerated
 
---------------------------------------------------
-STRUCTURE & FLOW:
-- Follow a logical walkthrough:
-  exterior → entry → living → kitchen → bedrooms → bathrooms → basement → outdoor
-- Each caption must connect naturally to the previous one
-- No random jumps between spaces
+        --------------------------------------------------
+        STRUCTURE & FLOW:
+        - Follow a logical walkthrough:
+          exterior → entry → living → kitchen → bedrooms → bathrooms → basement → outdoor
+        - Infer room_type from each image
+        - Ensure caption matches the inferred room_type
+        - Maintain spatial continuity between captions
+        - Do NOT repeat the same room_type consecutively unless clearly a different angle
 
---------------------------------------------------
-VISUAL DIRECTION:
-- Exterior shots → "drone", "slow aerial", "cinematic pan"
-- Interior wide shots → "slow dolly", "parallax", "push-in"
-- Detail shots → "macro", "focus pull"
+        --------------------------------------------------
+        VISUAL DIRECTION (STRICT):
+        You MUST choose ONE effect from this exact list:
+        
 
-Choose effects that match the scene naturally.
+        Effect selection rules:
+        - Exterior: drone_push, drone_pull
+        - Wide interior shots: pan_left, pan_right, zoom_in
+        - Vertical spaces: pan_up, pan_down
+        - Dynamic angles: pan_up_left, pan_down_right
+        - Premium feel: luxury_breathe
+        - Depth shots: 3d_pan_right, 3d_pan_left
+        - Detail shots: zoom_in
 
---------------------------------------------------
-STRICT RULES:
-- MAX 14 words per caption
-- Language: {language}
+        - Do NOT use effects outside the list
+        - Do NOT invent new names
+        - Effect must match the room_type and scene
 
---------------------------------------------------
-OUTPUT FORMAT (STRICT JSON ARRAY):
-Return ONE JSON array with {len(images)} objects.
+        --------------------------------------------------
+        CAPTION RULES (STRICT):
+        - MAX 14 words
+        - Prefer 8–12 words
+        - ONE main idea per caption
+        - No more than one "and" per caption
 
-Each object must include:
-- "image_index": integer
-- "room_type": string
-- "caption": string (max 14 words)
-- "effect": string
-"""
+        --------------------------------------------------
+        VALIDATION STEP (MANDATORY):
+        Before finalizing EACH caption:
+        - Confirm every feature mentioned is visible OR in MLS description
+        - If not, rewrite the caption
+
+        --------------------------------------------------
+        OUTPUT FORMAT (STRICT):
+        Return ONLY a valid JSON array with {len(images)} objects.
+
+        Each object must include:
+        - "image_index": integer
+        - "room_type": string
+        - "caption": string (max 14 words)
+        - "effect": string (must be from allowed list)
+
+        RULES:
+        - No comments
+        - No explanations
+        - No trailing commas
+        - Ensure array length = {len(images)}
+        """
 
     try:
         response = client.models.generate_content(

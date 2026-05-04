@@ -27,7 +27,12 @@ from moviepy import (
 )
 
 # Initialize the pipeline globally so the model stays in memory across requests.
-pipeline = KPipeline(lang_code='a')
+# pipeline = KPipeline(lang_code='a')
+
+pipelines = {
+    'a': KPipeline(lang_code='a'),
+    'e': KPipeline(lang_code='e')
+}
 
 # Fix for MoviePy 1.0.3 & Pillow 10+
 if not hasattr(Image, 'ANTIALIAS'):
@@ -35,17 +40,25 @@ if not hasattr(Image, 'ANTIALIAS'):
 
 # --- PROGRESS REPORTING HELPERS ---
 def normalize_tts_text(text):
-    """Expands common real estate abbreviations so the TTS pronounces them correctly."""
+    """Expands abbreviations and aggressively sanitizes hidden line breaks."""
     if not text: return text
     
-    # \b ensures we only replace the exact word, so we don't accidentally turn "left" into "lefeet"
+    # 1. Replace ALL newlines and carriage returns with a period and space
+    text = re.sub(r'[\r\n]+', '. ', text)
+    
+    # 2. Flatten any other weird spacing (tabs, vertical tabs) into a single standard space
+    text = re.sub(r'\s+', ' ', text)
+    
+    # 3. Expand Abbreviations
     text = re.sub(r'\bsqft\b', 'square feet', text, flags=re.IGNORECASE)
     text = re.sub(r'\bsq\.?\s*ft\.?\b', 'square feet', text, flags=re.IGNORECASE)
     text = re.sub(r'\bft\.?\b', 'feet', text, flags=re.IGNORECASE)
     text = re.sub(r'\bbd\.?\b', 'bedroom', text, flags=re.IGNORECASE)
     text = re.sub(r'\bba\.?\b', 'bathroom', text, flags=re.IGNORECASE)
     
-    return text
+    return text.strip()
+   
+
 
 def set_progress(job_id, percent):
     """Safely updates the progress in the main thread's jobs dict without circular imports."""
@@ -77,7 +90,14 @@ BED_PATHS = [[(0.1, 0.2), (0.1, 0.8)], [(0.1, 0.6), (0.9, 0.6), (0.9, 0.8)], [(0
 BATH_PATHS = [[(0.1, 0.5), (0.1, 0.8), (0.9, 0.8), (0.9, 0.5), (0.1, 0.5)], [(0.2, 0.8), (0.2, 0.9)], [(0.8, 0.8), (0.8, 0.9)], [(0.8, 0.5), (0.8, 0.1), (0.6, 0.1), (0.6, 0.2)]]
 SQFT_PATHS = [[(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8), (0.2, 0.2)]]
 
-MUSIC_MAP = {"Upbeat": "music/upbeat.mp3", "Luxury": "music/luxury.mp3", "Motivation": "music/Motivation.mp3"}
+MUSIC_MAP = {"top1": "music/top1.mp3", "top2": "music/top2.mp3", "top3": "music/top3.mp3", "top4": "music/top4.mp3", "top5": "music/top5.mp3"}
+ 
+            #  <option value="none">No Music</option>
+            # <option value="top1">Upbeat</option>
+            # <option value="top2">Luxury</option>
+            # <option value="top3">Motivation</option>
+            # <option value="top4">Inspiration</option>
+            # <option value="top5">Low Beat</option>
 
 # --- HELPER FUNCTIONS ---
 def hex_to_rgb(hex_color):
@@ -88,6 +108,7 @@ def get_font(font_name, size, base_dir):
     fonts_dir = os.path.join(base_dir, 'fonts')
     if font_name and os.path.exists(fonts_dir):
         search_term = str(font_name).split()[0].lower()
+        print(f"Searching for font '{font_name}' in {fonts_dir} with term '{search_term}'")
         for file in os.listdir(fonts_dir):
             if file.lower().endswith('.ttf') and search_term in file.lower():
                 font_path = os.path.join(fonts_dir, file)
@@ -453,11 +474,16 @@ async def generate_kokoro_audio_async(text, voice, output_path):
     def _run_kokoro():
         timings = []
         audio_chunks = []
+        
+        # 1. Expand abbreviations so they are pronounced correctly
         clean_text = normalize_tts_text(text)
         
-        # Kokoro breaks longer text into manageable chunks based on punctuation
-        generator = pipeline(clean_text, voice=voice, speed=1, split_pattern=r'\n+')
+        # 2. Dynamically select the correct language pipeline (English 'a' or Spanish 'e')
+        lang_prefix = voice[0] 
+        active_pipeline = pipelines.get(lang_prefix, pipelines['a'])
         
+        # Kokoro breaks longer text into manageable chunks based on punctuation
+        generator = active_pipeline(clean_text, voice=voice, speed=1, split_pattern=r'(?<=[.,!?])\s+')
         chunk_offset_seconds = 0.0
         sample_rate = 24000 # Kokoro's native sample rate
         
@@ -468,7 +494,7 @@ async def generate_kokoro_audio_async(text, voice, output_path):
             current_start = None
             
             # Extract the native timestamps exposed by Kokoro's tokens
-            tokens = getattr(result, "tokens", [])
+            tokens = getattr(result, "tokens", []) or []
             for token in tokens:
                 t_text = getattr(token, "text", "")
                 if not t_text: continue
@@ -491,8 +517,8 @@ async def generate_kokoro_audio_async(text, voice, output_path):
                     current_text = []
                     current_start = None
             
-            # --- FIX FOR MISSING LAST WORD ---
-            # If the final word had no trailing space, it gets stuck. We flush it here:
+            # 3. FIX FOR MISSING LAST WORD:
+            # If the final word had no trailing space, it gets stuck in the buffer. We flush it here.
             if current_text and current_start is not None:
                 word_text = "".join(current_text).strip()
                 if word_text:
@@ -504,7 +530,7 @@ async def generate_kokoro_audio_async(text, voice, output_path):
             # Advance the offset for the next spoken chunk
             chunk_offset_seconds += len(result.audio) / sample_rate
             
-        # Merge all audio chunks and save
+        # Merge all audio chunks and save to .wav
         if audio_chunks:
             final_audio = np.concatenate(audio_chunks)
             sf.write(output_path, final_audio, sample_rate)
@@ -513,6 +539,8 @@ async def generate_kokoro_audio_async(text, voice, output_path):
 
     # Run the heavy inference in a background thread to prevent blocking
     return await asyncio.to_thread(_run_kokoro)
+
+    
 def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, beds, baths, sqft, lang, font_choice, show_price, show_details, voice_model, status_choice, agent_name, brokerage, phone, mls_source, mls_number, target_slide_dur, timing_mode, theme_color, logo_path, base_dir, vo_data=None, custom_cta=None, show_captions=True):
     dur = target_slide_dur
     vo_clip, vo_timings = None, None
@@ -700,14 +728,12 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
 
     # Updated to Kokoro's native IDs
     VOICE_MAP = {
-        "Deep/Luxury": "am_onyx",         
-        "Friendly/Fast": "am_michael",    
-        "Professional/Clean": "am_adam",  
-        "Female/Warm": "af_bella",        
-        "Spanish/Mexico-Male": "am_adam", 
-        "Spanish/Mexico-Female": "af_bella",
-        "Spanish/Spain-Male": "am_adam",
-        "Spanish/US-Male": "am_adam"
+        "English-US-Bella": "af_bella",
+        "English-US-Heart": "af_heart",
+        "English-US-Fenrir": "am_fenrir",
+        "English-US-Michael": "am_michael",
+        "Spanish-Dora": "ef_dora",
+        "Spanish-Alex": "em_alex"
     }
 
     try:
@@ -720,11 +746,11 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
 
         tw, th = (720, 1280) if "Vertical" in req_dict.get('format', 'Vertical') else (1280, 720)
 
-        requested_voice = req_dict.get('voice', 'Professional/Clean')
+        requested_voice = req_dict.get('voice', 'English-US-Bella')
         lang = req_dict.get('language', 'English')
         
         # Fallback to am_adam if voice is not found
-        voice_id = VOICE_MAP.get(requested_voice, "am_adam")
+        voice_id = VOICE_MAP.get(requested_voice, "af_bella")
 
         set_progress(job_id, 10)
 
