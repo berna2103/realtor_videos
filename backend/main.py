@@ -8,16 +8,24 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from supabase import create_client, Client
 import traceback
+import requests
+import urllib.parse
+
+# Import the GenAI SDK for the auto-neighborhood feature
+from google import genai
 
 from engine import render_cinematic_video
-# NEW VERSION
 from scraper import fetch_zillow_data, analyze_scenes_batch, generate_fb_post_content
 
 app = FastAPI(title="Cinematic Listing AI Backend")
 
+# Setup Supabase
 supabase_url: str = os.getenv("SUPABASE_URL")
 supabase_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 supabase: Client = create_client(supabase_url, supabase_key) if supabase_url and supabase_key else None
+
+# Setup Gemini API Key for local tasks
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 def get_base_url():
     domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
@@ -34,20 +42,35 @@ app.mount("/raw_photos", StaticFiles(directory=INPUT_DIR), name="raw_photos")
 
 jobs = {}
 
+# --- MODELS ---
+
 class FetchRequest(BaseModel):
     zillowUrl: str
     language: Optional[str] = "English"
     user_id: Optional[str] = None
+    neighborhood_context: Optional[str] = ""
 
 class MetaDef(BaseModel):
-    address: str; price: str; beds: str; baths: str; sqft: str; agent: str; brokerage: str; phone: str = ""; website: str = ""; mls_source: str; mls_number: str; custom_cta: Optional[str] = None
+    address: str 
+    price: str 
+    beds: str 
+    baths: str 
+    sqft: str 
+    agent: str 
+    brokerage: str 
+    phone: str = "" 
+    website: str = "" 
+    mls_source: str 
+    mls_number: str 
+    custom_cta: Optional[str] = None
+    neighborhood_context: Optional[str] = ""
 
 class SceneDef(BaseModel):
     id: str
     image_path: str
     room_type: str
     caption: str
-    effect: str  # This now receives 'pan_left', 'pan_right', etc.
+    effect: str 
     enable_vo: bool
     image_url: Optional[str] = None
 
@@ -58,7 +81,7 @@ class RenderRequest(BaseModel):
     scenes: Optional[List[SceneDef]] = None
     format: Optional[str] = "Vertical (1080x1920)"
     language: Optional[str] = "English"
-    voice: Optional[str] = "Professional/Clean"
+    voice: Optional[str] = "English-US-Bella"
     font: Optional[str] = "Inter"
     music: Optional[str] = "none"
     primary_color: str = "#552448"
@@ -69,8 +92,65 @@ class RenderRequest(BaseModel):
     show_captions: Optional[bool] = True  
     enable_voice: Optional[bool] = True
 
+# --- BACKGROUND RENDER TASK ---
+
+def fetch_real_places(lat: float, lng: float, place_type: str) -> str:
+    """Fetches real local places using precise coordinates and the New Places API."""
+    api_key = os.getenv("GOOGLE_PLACES_API_KEY")
+    if not api_key or not lat or not lng:
+        return ""
+
+    url = "https://places.googleapis.com/v1/places:searchText"
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "places.displayName.text" 
+    }
+
+    # 1. Removed "top" to broaden the search
+    # 2. Changed to locationBias so Google guarantees results
+    payload = {
+        "textQuery": place_type, 
+        "locationBias": {
+            "circle": {
+                "center": {
+                    "latitude": lat,
+                    "longitude": lng
+                },
+                "radius": 2000.0  # 2000 meters
+            }
+        }
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=5)
+        data = response.json()
+        
+        # --- NEW: Print raw Google data to the terminal ---
+        print(f"RAW GOOGLE RESPONSE [{place_type}]: {data}")
+
+        if "error" in data:
+            print(f"Google API Error [{place_type}]: {data['error'].get('message', 'Unknown error')}")
+            return ""
+
+        places = data.get("places", [])
+        
+        # Grab the names of the top 2 results
+        names = []
+        for place in places[:3]:
+            name = place.get("displayName", {}).get("text")
+            if name:
+                names.append(name)
+
+        return ", ".join(names)
+
+    except Exception as e:
+        print(f"Places API Exception: {e}")
+        return ""
+    
 def background_render_task(job_id: str, req: RenderRequest):
-    """ENHANCEMENT: Handles the new async render function and cleans up disk space."""
+    """Handles the async render function and cleans up disk space."""
     try:
         jobs[job_id]["status"] = "rendering"
         jobs[job_id]["progress"] = 2
@@ -83,7 +163,6 @@ def background_render_task(job_id: str, req: RenderRequest):
         success = loop.run_until_complete(render_cinematic_video(job_id, req, output_path, BASE_DIR))
 
         if success:
-            # ENHANCEMENT: Explicitly show upload phase so the UI doesn't look frozen
             jobs[job_id]["progress"] = 99 
             final_video_url = f"{get_base_url()}/outputs/{output_filename}"
             
@@ -104,7 +183,7 @@ def background_render_task(job_id: str, req: RenderRequest):
                             "property_address": req.meta.address if req.meta else "New Listing"
                         }).execute()
                     
-                    # ENHANCEMENT: Prevent "Disk Full" server crashes by deleting local file after cloud upload
+                    # Prevent "Disk Full" server crashes by deleting local file after cloud upload
                     try:
                         if os.path.exists(output_path):
                             os.remove(output_path)
@@ -123,6 +202,8 @@ def background_render_task(job_id: str, req: RenderRequest):
         traceback.print_exc()  
         jobs[job_id].update({"status": "failed", "error": str(e), "progress": 0})
             
+# --- ENDPOINTS ---
+
 @app.post("/api/fetch-zillow")
 async def fetch_zillow(req: FetchRequest):
     if supabase and req.user_id:
@@ -136,13 +217,64 @@ async def fetch_zillow(req: FetchRequest):
         meta_data, downloaded_images = fetch_zillow_data(req.zillowUrl)
         downloaded_images = list(dict.fromkeys(downloaded_images))
 
+        # --- SMART HYPER-LOCAL NEIGHBORHOOD SYSTEM ---
+        if req.neighborhood_context and req.neighborhood_context.strip():
+            meta_data['neighborhood_context'] = req.neighborhood_context.strip()
+        else:
+            address_str = meta_data.get("address", "")
+            
+            # Safely extract latitude and longitude from the Zillow metadata
+            try:
+                lat = float(meta_data.get("latitude")) if meta_data.get("latitude") else None
+                lng = float(meta_data.get("longitude")) if meta_data.get("longitude") else None
+            except (ValueError, TypeError):
+                lat, lng = None, None
+
+            if address_str and GEMINI_API_KEY:
+                try:
+                    # 1. Fetch 100% real data from Google Maps using coordinates
+                    if lat and lng:
+                        real_restaurants = fetch_real_places(lat, lng, "restaurants")
+                        real_parks = fetch_real_places(lat, lng, "parks")
+                        real_transit = fetch_real_places(lat, lng, "transit stations")
+                        real_schools = fetch_real_places(lat, lng, "schools")
+                        real_shopping = fetch_real_places(lat, lng, "shopping centers")
+                    else:
+                        print("Warning: Latitude or Longitude missing. Cannot fetch exact places.")
+                        real_restaurants = real_parks = real_transit = real_schools = real_shopping = ""
+
+                    print(f"Real places for {address_str} ({lat}, {lng}):\nRestaurants: {real_restaurants}\nParks: {real_parks}\nTransit: {real_transit}\nSchools: {real_schools}\nShopping: {real_shopping}")
+                    
+                    client = genai.Client(api_key=GEMINI_API_KEY)
+                    
+                    # 2. Force Gemini to use ONLY the data we just scraped
+                    vibe_prompt = f"""
+                    You are a highly knowledgeable local real estate expert for {address_str}.
+                    Write a 3-sentence neighborhood lifestyle pitch for a homebuyer. 
+                    
+                    You MUST mention these exact local restaurants: {real_restaurants}.
+                    You MUST mention these exact nearby parks: {real_parks}.
+                    You MUST mention these exact transit stations: {real_transit}.
+                    You MUST mention these exact schools: {real_schools}.
+                    You MUST mention these exact shopping centers: {real_shopping}.
+
+                    Weave them into a natural, exciting pitch. 
+                    CRITICAL: Do NOT invent, guess, or hallucinate any other places, restaurants, or amenities.
+                    """
+                    response = client.models.generate_content(model='gemini-2.0-flash', contents=vibe_prompt)
+                    meta_data['neighborhood_context'] = response.text.strip()
+                except Exception as e:
+                    print(f"Failed to auto-generate neighborhood context: {e}")
+                    meta_data['neighborhood_context'] = ""
+        # ---------------------------------------------
+
         print(f"Fetched metadata: {meta_data}")
         
         # 2. Generate content (FB Post and the Batch Video Script)
         base_url = get_base_url()
         address_str = meta_data.get("address", "New Listing")
         
-        # --- NEW ENHANCEMENT: Generate Multi-Platform Social Drafts ---
+        # Multi-Platform Social Drafts
         facebook_draft = generate_fb_post_content(meta_data, req.language)
         social_drafts = {
             "facebook": facebook_draft,
@@ -150,9 +282,8 @@ async def fetch_zillow(req: FetchRequest):
             "tiktok": f"Wait until you see the inside of this house! 🤯🏡 {address_str} #realestate #hometour #property"
         }
         
-        # --- ENHANCEMENT: Call Gemini ONCE for all images ---
+        # Call Gemini to write the script using the new text-only approach
         batch_analysis = analyze_scenes_batch(downloaded_images, req.language, meta_data)
-        # --------------------------------------------------------
 
         scenes = []
         for i, img_path in enumerate(downloaded_images):
@@ -190,12 +321,14 @@ async def fetch_zillow(req: FetchRequest):
         
     except Exception as e: 
         raise HTTPException(status_code=500, detail=str(e))
+    
 
 @app.post("/api/render-video")
 async def start_render(req: RenderRequest, background_tasks: BackgroundTasks):
     if supabase and req.user_id:
         response = supabase.rpc("deduct_credit", {"target_user_id": req.user_id}).execute()
         if not response.data: raise HTTPException(status_code=402, detail="Insufficient credits.")
+    
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "queued", "progress": 0, "video_url": None, "error": None}
     background_tasks.add_task(background_render_task, job_id, req)

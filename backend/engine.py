@@ -92,12 +92,6 @@ SQFT_PATHS = [[(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8), (0.2, 0.2)]]
 
 MUSIC_MAP = {"top1": "music/top1.mp3", "top2": "music/top2.mp3", "top3": "music/top3.mp3", "top4": "music/top4.mp3", "top5": "music/top5.mp3"}
  
-            #  <option value="none">No Music</option>
-            # <option value="top1">Upbeat</option>
-            # <option value="top2">Luxury</option>
-            # <option value="top3">Motivation</option>
-            # <option value="top4">Inspiration</option>
-            # <option value="top5">Low Beat</option>
 
 # --- HELPER FUNCTIONS ---
 def hex_to_rgb(hex_color):

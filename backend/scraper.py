@@ -58,7 +58,9 @@ def fetch_zillow_data(url: str):
     meta = {
         "address": "", "price": "", "beds": "", "baths": "", 
         "sqft": "", "agent": "", "brokerage": "", 
-        "mls_source": "", "mls_number": "", "description": data.get("description", "")
+        "mls_source": "", "mls_number": "", "description": data.get("description", ""),
+        "neighborhood_context": data.get("neighborhoodRegion", {}).get("name", "")
+
     }
 
     if data.get("address") and data.get("city"):
@@ -71,6 +73,17 @@ def fetch_zillow_data(url: str):
     sqft_val = data.get("living_area_sqft") or data.get("livingArea") or data.get("livingAreaValue")
     if sqft_val:
         meta["sqft"] = f"{int(sqft_val):,}"
+
+    lat = data.get("latitude") or data.get("lat")
+    lng = data.get("longitude") or data.get("lng")
+    
+    # Fallback if nested
+    if not lat and data.get("location"):
+        lat = data.get("location", {}).get("latitude")
+        lng = data.get("location", {}).get("longitude")
+        
+    meta["latitude"] = lat
+    meta["longitude"] = lng
 
     # Extract images
     image_urls = data.get("image_urls", [])
@@ -97,136 +110,205 @@ def fetch_zillow_data(url: str):
 
 # --- NEW ENHANCED BATCH ANALYSIS ---
 
+# def analyze_scenes_batch(image_paths: List[str], language: str, meta_data: dict):
+#     """Uses Gemini 2.0 Flash to see all images at once and create a flowing story."""
+#     client = genai.Client(api_key=API_KEY)
+    
+#     # Load all images into memory
+#     images = [PIL.Image.open(path) for path in image_paths]
+    
+#     prompt = f"""
+# You are an award-winning real estate video director AND a strict compliance-driven local neighborhood expert.
+
+# Your job is to create a cinematic walkthrough that makes the buyer fall in love with the home first, and the location second.
+
+# STRICT LANGUAGE REQUIREMENT: You must write all captions in {language}.
+
+# --------------------------------------------------
+# INPUTS
+
+# ADDRESS:
+# {meta_data.get('address')}
+
+# MLS DESCRIPTION (PRIMARY SOURCE OF TRUTH):
+# \"\"\"
+# {meta_data.get('description')}
+# \"\"\"
+
+# NEIGHBORHOOD CONTEXT:
+# \"\"\"
+# {meta_data.get('neighborhood_context')}
+# \"\"\"
+
+# --------------------------------------------------
+# THE "ANTI-OBVIOUS" RULE (CRITICAL)
+
+# - NEVER state basic, expected functional features. 
+# - Do NOT say "the bathroom has a toilet and shower", "the kitchen has cabinets and an oven", or "the bedroom has a bed and windows". Assume the buyer is intelligent.
+# - INSTEAD: Focus on the "vibe", selling points, finishes, natural light, space, or architectural details. 
+# - Example Bad: "This bathroom has a mirror and shower."
+# - Example Good: "A crisp, spa-like retreat to start your day."
+# - Example Bad: "The living room has wood floors and walls."
+# - Example Good: "An expansive, sun-drenched gathering space."
+
+# --------------------------------------------------
+# THE TWO-ACT NARRATIVE ARC (CRITICAL)
+
+# Your video script MUST follow this exact two-part structure based on the number of images:
+
+# ACT 1: THE HOME (First 60-70% of scenes)
+# - Focus strictly on the physical property, interior features, finishes, and layout (following the Anti-Obvious Rule).
+# - VISUAL ACCURACY: You must ONLY describe what is clearly visible in the image.
+
+# ACT 2: THE NEIGHBORHOOD EXPERT (Final 30-40% of scenes)
+# - If NEIGHBORHOOD CONTEXT is provided, you MUST pivot to selling the location and lifestyle.
+# - Speak like a true local expert pitching the area based ONLY on the provided context.
+# - EXCEPTION TO VISUAL ACCURACY: During Act 2, you may talk about the neighborhood (e.g., walkability, parks, vibe) even if the current image is a bedroom, backyard, or window view. Connect the home to the location (e.g., "Just steps outside, you'll find...", "Living here puts you minutes from...").
+# - If NEIGHBORHOOD CONTEXT is empty, simply finish summarizing the home's best features.
+
+# --------------------------------------------------
+# ANTI-HALLUCINATION GUARANTEE (CRITICAL)
+
+# - NEVER invent restaurants, parks, schools, stores, or amenities.
+# - NEVER assume materials (e.g., quartz, marble) unless explicitly stated in MLS.
+# - If uncertain, OMIT the detail completely.
+
+# --------------------------------------------------
+# VISUAL EFFECTS (STRICT)
+
+# You MUST choose ONE effect from this list ONLY for each scene:
+# zoom_in, zoom_out, pan_right, pan_left,
+# pan_up, pan_down, pan_up_left, pan_down_right,
+# drone_push, drone_pull, luxury_breathe,
+# 3d_pan_right, 3d_pan_left
+
+# Effect rules:
+# - Exterior → drone_push or drone_pull
+# - Wide interiors → pan_left / pan_right / zoom_in
+# - Detail shots → zoom_in
+# - Vertical spaces → pan_up / pan_down
+# - Premium feel → luxury_breathe
+# - Depth shots → 3d_pan_left / 3d_pan_right
+
+# --------------------------------------------------
+# CAPTION RULES (STRICT)
+
+# - Max 14 words per caption.
+# - Preferred: 8–12 words.
+# - One main idea per caption.
+# - No more than ONE "and" per caption.
+# - No vague filler words (beautiful, amazing, stunning) unless tied to a visible feature.
+
+# --------------------------------------------------
+# OUTPUT FORMAT (STRICT)
+
+# Return ONLY a valid JSON array with {len(images)} objects.
+
+# Each object must contain:
+# - "image_index": integer
+# - "room_type": string (based on visual inference)
+# - "caption": string (max 14 words)
+# - "effect": string (must be from allowed list)
+
+# RULES:
+# - No explanations
+# - No markdown formatting block (e.g. no ```json)
+# - Output length MUST equal exactly {len(images)}
+# """
+#     try:
+#         response = client.models.generate_content(
+#             model='gemini-2.0-flash', 
+#             contents=[prompt] + images,
+#             config=types.GenerateContentConfig(
+#                 response_mime_type="application/json",
+#                 response_schema=VideoScript,
+#                 temperature=0.3
+#             )
+#         )
+#         data = json.loads(response.text)
+#         return data.get("scenes", [])
+#     except Exception as e:
+#         print(f"Gemini Batch Error: {e}")
+#         return []
+
 def analyze_scenes_batch(image_paths: List[str], language: str, meta_data: dict):
-    """Uses Gemini 2.0 Flash to see all images at once and create a flowing story."""
+    """Uses Gemini 2.0 Flash to write a cohesive script strictly from text data."""
     client = genai.Client(api_key=API_KEY)
     
-    # Load all images into memory
-    images = [PIL.Image.open(path) for path in image_paths]
+    num_scenes = len(image_paths)
+    if num_scenes == 0:
+        return []
     
     prompt = f"""
-        You are an award-winning real estate video director and compliant property marketing specialist.
+You are an award-winning real estate copywriter. Your job is to write a highly engaging, flowing voiceover script for a property video.
 
-        Analyze ALL provided images AND the MLS property description below to understand the home.
+STRICT LANGUAGE REQUIREMENT: You must write all captions in {language}.
 
-        ADDRESS:
-        {meta_data.get('address')}
+--------------------------------------------------
+INPUT DATA
 
-        MLS DESCRIPTION (SOURCE OF TRUTH):
-        \"\"\"
-        {meta_data.get('description')}
-        \"\"\"
+ADDRESS:
+{meta_data.get('address')}
 
-        GOAL:
-        Create a cinematic walkthrough that feels like a buyer experiencing the home in real time—not just viewing it.
+MLS DESCRIPTION:
+\"\"\"
+{meta_data.get('description')}
+\"\"\"
 
-        The captions should guide the viewer naturally from space to space, like an in-person showing.
+NEIGHBORHOOD CONTEXT:
+\"\"\"
+{meta_data.get('neighborhood_context')}
+\"\"\"
 
-        --------------------------------------------------
-        LANGUAGE SETTING (CRITICAL):
-        - You MUST write all captions in {language}
-        - ALL output must be in {language}
-        - Do NOT mix languages
+--------------------------------------------------
+YOUR TASK
 
-        --------------------------------------------------
-        TRUTH & COMPLIANCE RULES (CRITICAL):
-        - ONLY mention features explicitly stated in the MLS description OR clearly visible in images
-        - "Clearly visible" = unambiguous and directly identifiable (e.g., stove, island, bathtub, windows)
-        - If uncertain, DO NOT mention it
-        - NEVER assume materials (e.g., hardwood, quartz, marble) unless explicitly confirmed
-        - NEVER infer upgrades, condition, or quality not stated
-        - Stay compliant with Fair Housing laws:
-          - Do NOT reference people, demographics, families, income, religion, or protected classes
-          - Do NOT use exclusionary or biased language
-        - Avoid prohibited terms: "perfect", "best", "guaranteed", "dream home"
+You must write a script broken down into EXACTLY {num_scenes} sequential captions. 
+The video will be a slideshow of {num_scenes} photos. You do not know what the photos look like, so write a script that flows naturally as a general property tour.
 
-        --------------------------------------------------
-        VOICE & TONE (CRITICAL):
-        - Write like you're guiding a buyer in person
-        - Use inviting, experiential language (what can they do/feel here)
-        - Use natural second-person phrasing when appropriate (e.g., "step into", "unwind in")
-        - Focus on lifestyle anchored to visible features
+NARRATIVE ARC:
+1. First 40-60% of captions: Sell the home. Highlight the best architectural features, renovations, space, and vibe mentioned in the MLS Description. 
+2. Final 50-60% of captions: Pivot to the Neighborhood Context. Sell the location, walkability, nearby amenities, and the lifestyle. 
 
-        STYLE RULES:
-        - Each caption must reference at least ONE tangible, visible element
-        - Avoid vague descriptors (e.g., "nice", "beautiful", "inviting") unless tied to a feature
-        - Use subtle action verbs: step into, unwind, gather, enjoy, relax, host
-        - Avoid robotic or repetitive phrasing
-        - Do NOT start consecutive captions with the same word
-        - Avoid repeating the same verbs across consecutive captions
-        - Keep tone natural—not overly poetic or exaggerated
+--------------------------------------------------
+COPYWRITING RULES (STRICT)
 
-        --------------------------------------------------
-        STRUCTURE & FLOW:
-        - Follow a logical walkthrough:
-          exterior → entry → living → kitchen → bedrooms → bathrooms → basement → outdoor
-        - Infer room_type from each image
-        - Ensure caption matches the inferred room_type
-        - Maintain spatial continuity between captions
-        - Do NOT repeat the same room_type consecutively unless clearly a different angle
+- NEVER state the obvious (e.g., "This home has a kitchen" or "Here is a bedroom").
+- INSTEAD: Focus on emotional hooks, luxury, natural light, and lifestyle (e.g., "A sun-drenched space perfect for entertaining" or "Your private morning retreat").
+- NEVER invent amenities, parks, or materials that are not explicitly mentioned in the text inputs.
+- Max 14 words per caption. (Preferred: 8–12 words).
+- Make it sound like a continuous, flowing commercial.
 
-        --------------------------------------------------
-        VISUAL DIRECTION (STRICT):
-        You MUST choose ONE effect from this exact list:
-        
+--------------------------------------------------
+OUTPUT FORMAT (STRICT)
 
-        Effect selection rules:
-        - Exterior: drone_push, drone_pull
-        - Wide interior shots: pan_left, pan_right, zoom_in
-        - Vertical spaces: pan_up, pan_down
-        - Dynamic angles: pan_up_left, pan_down_right
-        - Premium feel: luxury_breathe
-        - Depth shots: 3d_pan_right, 3d_pan_left
-        - Detail shots: zoom_in
+Return ONLY a valid JSON array with EXACTLY {num_scenes} objects.
 
-        - Do NOT use effects outside the list
-        - Do NOT invent new names
-        - Effect must match the room_type and scene
+Each object must contain:
+- "image_index": integer (Must go in order from 0 to {num_scenes - 1})
+- "room_type": string (Make a logical guess of the progression, e.g., "Exterior", "Living Area", "Kitchen", "Primary Suite", "Lifestyle")
+- "caption": string (The spoken script line)
+- "effect": string (Choose one randomly from: zoom_in, zoom_out, pan_right, pan_left, pan_up, luxury_breathe)
 
-        --------------------------------------------------
-        CAPTION RULES (STRICT):
-        - MAX 14 words
-        - Prefer 8–12 words
-        - ONE main idea per caption
-        - No more than one "and" per caption
-
-        --------------------------------------------------
-        VALIDATION STEP (MANDATORY):
-        Before finalizing EACH caption:
-        - Confirm every feature mentioned is visible OR in MLS description
-        - If not, rewrite the caption
-
-        --------------------------------------------------
-        OUTPUT FORMAT (STRICT):
-        Return ONLY a valid JSON array with {len(images)} objects.
-
-        Each object must include:
-        - "image_index": integer
-        - "room_type": string
-        - "caption": string (max 14 words)
-        - "effect": string (must be from allowed list)
-
-        RULES:
-        - No comments
-        - No explanations
-        - No trailing commas
-        - Ensure array length = {len(images)}
-        """
-
+RULES:
+- No markdown formatting block (e.g. no ```json)
+- Output length MUST equal exactly {num_scenes}
+"""
     try:
         response = client.models.generate_content(
             model='gemini-2.0-flash', 
-            contents=[prompt] + images,
+            # Notice we are NO LONGER passing the images array here!
+            contents=[prompt],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=VideoScript,
-                temperature=0.3
+                temperature=0.4 # Slightly higher temperature for better creative writing
             )
         )
         data = json.loads(response.text)
         return data.get("scenes", [])
     except Exception as e:
-        print(f"Gemini Batch Error: {e}")
+        print(f"Gemini Script Error: {e}")
         return []
 
 def generate_fb_post_content(meta, language="English"):

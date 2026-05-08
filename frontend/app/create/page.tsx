@@ -417,7 +417,8 @@ export default function CinematicListingApp() {
   });
   const [scenes, setScenes] = useState<Scene[]>([]);
 
-  // ENHANCEMENT: Multi-platform Social Drafts
+  // ENHANCEMENT: Neighborhood Context & Multi-platform Social Drafts
+  const [neighborhoodContext, setNeighborhoodContext] = useState("");
   const [socialDrafts, setSocialDrafts] = useState({
     facebook: "",
     instagram: "",
@@ -462,10 +463,10 @@ export default function CinematicListingApp() {
 
   // Sync Voice and Language for Spanish
   useEffect(() => {
-    if (language === "Spanish" && !voice.startsWith("Spanish/")) {
-      setVoice("Spanish/Mexico-Male");
-    } else if (language === "English" && voice.startsWith("Spanish/")) {
-      setVoice("Professional/Clean");
+    if (language === "Spanish" && !voice.startsWith("Spanish-")) {
+      setVoice("Spanish-Alex");
+    } else if (language === "English" && voice.startsWith("Spanish-")) {
+      setVoice("English-US-Bella");
     }
   }, [language]);
 
@@ -565,7 +566,7 @@ export default function CinematicListingApp() {
     // Prevent default if triggered by a form submission
     if (e) e.preventDefault();
 
-    // 1. ENHANCEMENT: Pre-validate URL before hitting the backend
+    // 1. Pre-validate URL before hitting the backend
     if (!isValidZillowUrl(zillowUrl)) {
       toast.error(
         "Invalid Zillow URL. Please ensure it includes the property ID (_zpid).",
@@ -578,7 +579,8 @@ export default function CinematicListingApp() {
       const response = await fetch(`${API_URL}/api/fetch-zillow`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zillowUrl, language }),
+        // Passes both the URL and the newly added neighborhood context
+        body: JSON.stringify({ zillowUrl, language, neighborhood_context: neighborhoodContext }),
       });
 
       if (response.status === 402) {
@@ -593,7 +595,7 @@ export default function CinematicListingApp() {
       }
 
       setMeta({ ...meta, ...data.meta });
-      // ENHANCEMENT: Populate Social Drafts
+      // Populate Social Drafts
       setSocialDrafts(
         data.socialDrafts || {
           facebook: data.fbDraft || "",
@@ -603,13 +605,11 @@ export default function CinematicListingApp() {
       );
       setScenes(data.scenes || []);
 
-      // 2. ENHANCEMENT: Optional success feedback before moving to step 2
       toast.success("Property data fetched successfully!");
 
       setStep(2);
     } catch (error: any) {
       console.error("Fetch error:", error);
-      // 3. ENHANCEMENT: Replaced blocking alert() with non-blocking toast
       toast.error(
         error.message || "Failed to fetch property data. Please try again.",
       );
@@ -635,7 +635,7 @@ export default function CinematicListingApp() {
     setRenderMsgIdx(0);
     const msgInterval = setInterval(
       () => setRenderMsgIdx((p) => (p + 1) % RENDER_MESSAGES.length),
-      6000, // Faster message rotation to match faster backend
+      6000, 
     );
 
     try {
@@ -658,7 +658,6 @@ export default function CinematicListingApp() {
           custom_cta: meta.custom_cta || null,
           show_captions: showCaptions,
           enable_voice: enableVoice,
-           
         }),
       });
 
@@ -711,7 +710,7 @@ export default function CinematicListingApp() {
         } catch (err) {
           console.error("Polling error", err);
         }
-      }, 2000); // Poll slightly faster for smoother progress bar
+      }, 2000); 
 
     } catch (e: any) {
       clearInterval(msgInterval);
@@ -982,7 +981,6 @@ export default function CinematicListingApp() {
                 </div>
               </div>
 
-              {/* THE ESCAPE HATCH BUTTON */}
               <div className="mt-12 text-center animate-in fade-in slide-in-from-bottom-4 duration-700 delay-500">
                 <p className="text-sm text-slate-400 mb-3 font-medium">Need to do something else?</p>
                 <button
@@ -1009,37 +1007,54 @@ export default function CinematicListingApp() {
                 Transform any Zillow listing into a high-end property tour in
                 seconds. Paste the URL below to begin.
               </p>
-              <div className="p-3 bg-white border border-slate-200 rounded-[2rem] flex flex-col sm:flex-row gap-3 shadow-2xl shadow-slate-200/60 ring-1 ring-black/5 max-w-3xl mx-auto">
-                <div className="flex-1 flex flex-col justify-center px-4 relative">
-                  <div className="flex items-center w-full">
-                    <LinkIcon className="w-5 h-5 text-slate-400 mr-3" />
-                    <input
-                      id="zillowUrl"
-                      type="url"
-                      value={zillowUrl}
-                      onChange={(e) => setZillowUrl(e.target.value)}
-                      placeholder="Paste Zillow URL here..."
-                      className="w-full bg-transparent py-4 text-slate-900 outline-none placeholder:text-slate-400 text-lg"
-                    />
+              
+              {/* --- ENHANCED HERO INPUT WITH NEIGHBORHOOD CONTEXT --- */}
+              <div className="p-3 bg-white border border-slate-200 rounded-[2rem] flex flex-col gap-3 shadow-2xl shadow-slate-200/60 ring-1 ring-black/5 max-w-3xl mx-auto text-left">
+                <div className="flex flex-col sm:flex-row gap-3 w-full">
+                  <div className="flex-1 flex flex-col justify-center px-4 relative bg-slate-50 rounded-2xl border border-slate-100">
+                    <div className="flex items-center w-full">
+                      <LinkIcon className="w-5 h-5 text-slate-400 mr-3" />
+                      <input
+                        id="zillowUrl"
+                        type="url"
+                        value={zillowUrl}
+                        onChange={(e) => setZillowUrl(e.target.value)}
+                        placeholder="Paste Zillow URL here..."
+                        className="w-full bg-transparent py-4 text-slate-900 outline-none placeholder:text-slate-400 text-lg"
+                      />
+                    </div>
                   </div>
-                  {/* Inline Error Message */}
-                  {zillowUrl && !isValidZillowUrl(zillowUrl) && (
-                    <span className="text-red-500 text-xs text-left ml-8 pb-1 block -mt-1 font-medium">
-                      Must be a valid Zillow URL containing a property ID.
-                    </span>
-                  )}
+                  <button
+                    onClick={handleFetchData}
+                    disabled={isLoading}
+                    className="bg-blue-600 text-white px-10 py-5 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200 active:scale-[0.98] flex items-center justify-center disabled:opacity-50 shrink-0"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      "Build My Tour"
+                    )}
+                  </button>
                 </div>
-                <button
-                  onClick={handleFetchData}
-                  disabled={isLoading}
-                  className="bg-blue-600 text-white px-10 py-5 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200 active:scale-[0.98] flex items-center justify-center disabled:opacity-50"
-                >
-                  {isLoading ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    "Build My Tour"
-                  )}
-                </button>
+                
+                {/* Neighborhood Context Field */}
+                <div className="px-2 pb-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-2 mb-1 block">
+                    Neighborhood Vibe (Optional)
+                  </label>
+                  <textarea
+                    value={neighborhoodContext}
+                    onChange={(e) => setNeighborhoodContext(e.target.value)}
+                    placeholder="e.g., Quiet Oak Lawn street, walkable to the Metra... (Leave blank for AI auto-generation)"
+                    className="w-full bg-transparent border border-slate-200 rounded-xl p-3 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all resize-none h-20"
+                  />
+                </div>
+                
+                {zillowUrl && !isValidZillowUrl(zillowUrl) && (
+                  <span className="text-red-500 text-xs font-medium px-4">
+                    Must be a valid Zillow URL containing a property ID.
+                  </span>
+                )}
               </div>
             </div>
           ) : step === 2 ? (
@@ -1450,7 +1465,7 @@ export default function CinematicListingApp() {
             language={language}
             setLanguage={setLanguage}
             user={user}
-            usAuthLoading={isAuthLoading}
+            isAuthLoading={isAuthLoading}
             showCaptions={showCaptions}
             setShowCaptions={setShowCaptions}
             enableVoice={enableVoice}
