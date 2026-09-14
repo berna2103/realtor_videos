@@ -16,7 +16,6 @@ import {
   Share2,
   Loader2,
   CheckCircle2,
-  ChevronRight,
   Palette,
   Film,
   Coins,
@@ -28,6 +27,7 @@ import {
   Phone,
   RefreshCw,
   LayoutDashboard,
+  Image as ImageIcon
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -99,6 +99,7 @@ interface Meta {
   website: string;
   custom_cta?: string;
   custom_end_title?: string;
+  custom_tagline?: string;
 }
 
 const RENDER_MESSAGES = [
@@ -461,6 +462,10 @@ export default function CinematicListingApp() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
+  // Carousel Entries
+  const [customTagline, setCustomTagline] = useState(" ");
+
+
   // Sync Voice and Language for Spanish
   useEffect(() => {
     if (language === "Spanish" && !voice.startsWith("Spanish-")) {
@@ -769,6 +774,62 @@ export default function CinematicListingApp() {
         newScenes[index + 1],
       ];
     setScenes(newScenes);
+  };
+
+const handleDownloadCarousel = async () => {
+      setIsDownloading(true);
+      
+      // FIX: Include all required fields that the FastAPI RenderRequest model expects
+      const payload = {
+          meta: {
+              ...meta,
+              custom_tagline: customTagline 
+          },
+          scenes: scenes,
+          primary_color: primaryColor,
+          format: format,
+          language: language,
+          voice: voice,
+          font: font,
+          music: music,
+          status_choice: statusChoice,
+          is_own_listing: isOwnListing,
+          show_captions: showCaptions,
+          enable_voice: enableVoice,
+          logo_data: logoData
+      };
+
+      try {
+          const response = await fetch(`${API_URL}/api/generate-carousel`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+          });
+
+          if (!response.ok) {
+              const err = await response.json();
+              console.error("Backend Error Details:", err);
+              throw new Error("Failed to generate carousel");
+          }
+
+          // Handle the incoming ZIP file stream
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.setAttribute('download', `carousel_${meta.address.replace(/[^a-z0-9]/gi, "_") || "instagram"}.zip`);
+          document.body.appendChild(link);
+          link.click();
+          
+          link.parentNode?.removeChild(link);
+          window.URL.revokeObjectURL(url);
+          
+      } catch (error) {
+          console.error("Error downloading carousel:", error);
+          toast.error("Failed to download the carousel. Check console for details.");
+      } finally {
+          setIsDownloading(false);
+      }
   };
 
   return (
@@ -1247,7 +1308,7 @@ export default function CinematicListingApp() {
                         navigator.clipboard.writeText(
                           socialDrafts[activeTab as keyof typeof socialDrafts],
                         );
-                        alert(
+                        toast.success(
                           `✅ ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} caption copied!`,
                         );
                       }}
@@ -1331,6 +1392,40 @@ export default function CinematicListingApp() {
               </div>
             </div>
           </section>
+
+          {/* --- NEW INSTAGRAM CAROUSEL SECTION --- */}
+          {step > 1 && (
+            <section className="space-y-4 pt-4">
+              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
+                <ImageIcon className="w-3.5 h-3.5" /> Instagram Carousel
+              </h3>
+              <div className="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm space-y-4">
+                <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                  Instantly download a ready-to-post 10-slide photo carousel formatted perfectly for Instagram (4:5).
+                </p>
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-500 font-bold uppercase block">
+                    Cover Tagline
+                  </label>
+                  <input
+                    type="text"
+                    value={customTagline}
+                    onChange={(e) => setCustomTagline(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors"
+                    placeholder="e.g., 15 MIN FROM DOWNTOWN ✈️"
+                  />
+                </div>
+                <button
+                  onClick={handleDownloadCarousel}
+                  disabled={isDownloading || scenes.length === 0}
+                  className="w-full bg-gradient-to-r from-pink-500 to-orange-400 hover:from-pink-600 hover:to-orange-500 text-white py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isDownloading ? <Loader2 className="animate-spin w-4 h-4" /> : <Download className="w-4 h-4" />}
+                  Download IG Carousel
+                </button>
+              </div>
+            </section>
+          )}
 
           <section className="space-y-4 pt-4">
             <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">
@@ -1553,6 +1648,37 @@ export default function CinematicListingApp() {
               </div>
             </div>
           </section>
+
+          {/* MOBILE CAROUSEL SECTION */}
+          {step > 1 && (
+            <section className="space-y-4 pt-4">
+              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
+                <ImageIcon className="w-3.5 h-3.5" /> Instagram Carousel
+              </h3>
+              <div className="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-500 font-bold uppercase block">
+                    Cover Tagline
+                  </label>
+                  <input
+                    type="text"
+                    value={customTagline}
+                    onChange={(e) => setCustomTagline(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors"
+                    placeholder="e.g., 15 MIN FROM DOWNTOWN ✈️"
+                  />
+                </div>
+                <button
+                  onClick={handleDownloadCarousel}
+                  disabled={isDownloading || scenes.length === 0}
+                  className="w-full bg-gradient-to-r from-pink-500 to-orange-400 hover:from-pink-600 hover:to-orange-500 text-white py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isDownloading ? <Loader2 className="animate-spin w-4 h-4" /> : <Download className="w-4 h-4" />}
+                  Download IG Carousel
+                </button>
+              </div>
+            </section>
+          )}
 
           <section className="space-y-4 pt-4">
             <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">
