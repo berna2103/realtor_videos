@@ -857,8 +857,10 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
             codec="libx264", 
             audio_codec="aac", 
             threads=4, 
-            preset="ultrafast", 
+            preset="medium", 
+            #preset="ultrafast",
             logger=render_logger, 
+            bitrate="8000k",
             ffmpeg_params=["-movflags", "faststart"]
         )
         return True
