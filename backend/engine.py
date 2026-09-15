@@ -1,4 +1,11 @@
 import os
+import warnings
+
+# --- SUPPRESS ALL KOKORO & PYTORCH TERMINAL WARNINGS ---
+os.environ["HF_HUB_DISABLE_WARNINGS"] = "1"
+warnings.filterwarnings("ignore", message=".*dropout option adds dropout.*")
+warnings.filterwarnings("ignore", message=".*weight_norm is deprecated.*")
+
 import asyncio
 import sys
 import hashlib
@@ -28,13 +35,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# --- FIX: Pass explicit repo_id to silence the Kokoro default warnings ---
 pipelines = {
-    'a': KPipeline(lang_code='a'),
-    'e': KPipeline(lang_code='e')
+    'a': KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M'),
+    'e': KPipeline(lang_code='e', repo_id='hexgrad/Kokoro-82M')
 }
 
 IG_WIDTH = 1080
 IG_HEIGHT = 1350
+
 
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
@@ -210,26 +219,66 @@ def draw_vector_eho_logo(draw, get_font_func, x, y, size=50, base_dir=""):
     draw.text((x + size + 15, y + size*0.1), "EQUAL HOUSING", font=font, fill=color)
     draw.text((x + size + 15, y + size*0.5), "OPPORTUNITY", font=font, fill=color)
 
-def create_circular_avatar(img_path, size):
+def create_circular_avatar(path, size, border_width=4, border_color=(34, 197, 94)):
     try:
-        img = Image.open(img_path).convert("RGBA")
-        min_dim = min(img.width, img.height)
-        left = (img.width - min_dim)/2
-        top = (img.height - min_dim)/2
-        img = img.crop((left, top, left+min_dim, top+min_dim))
-        img = img.resize((size, size), Image.Resampling.LANCZOS)
-        mask = Image.new('L', (size, size), 0)
-        draw = ImageDraw.Draw(mask)
-        draw.ellipse((0, 0, size, size), fill=255)
-        out = Image.new('RGBA', (size, size), (0,0,0,0))
-        out.paste(img, (0,0), mask=mask)
-        draw_out = ImageDraw.Draw(out)
-        draw_out.ellipse((2, 2, size-2, size-2), outline=(255,255,255,255), width=8)
-        return out
+        # Create at 4x resolution for a smoother circle
+        scale = 4
+        large_size = size * scale
+        large_border = border_width * scale
+
+        # Open and resize photo
+        img = Image.open(path).convert("RGB")
+        img.thumbnail((large_size, large_size), Image.Resampling.LANCZOS)
+
+        # Create square canvas
+        avatar = Image.new("RGBA", (large_size, large_size), (0, 0, 0, 0))
+
+        # Center the photo
+        x = (large_size - img.width) // 2
+        y = (large_size - img.height) // 2
+        avatar.paste(img, (x, y))
+
+        # Create circular mask
+        mask = Image.new("L", (large_size, large_size), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse(
+            (0, 0, large_size - 1, large_size - 1),
+            fill=255
+        )
+
+        # Apply circular mask
+        avatar.putalpha(mask)
+
+        # Draw thin green border
+        border = Image.new("RGBA", (large_size, large_size), (0, 0, 0, 0))
+        border_draw = ImageDraw.Draw(border)
+
+        border_draw.ellipse(
+            (
+                large_border // 2,
+                large_border // 2,
+                large_size - large_border // 2 - 1,
+                large_size - large_border // 2 - 1
+            ),
+            outline=border_color + (255,),
+            width=large_border
+        )
+
+        # Combine border and avatar
+        avatar = Image.alpha_composite(avatar, border)
+
+        # Downsample to final size for smooth edges
+        avatar = avatar.resize(
+            (size, size),
+            Image.Resampling.LANCZOS
+        )
+
+        return avatar
+
     except Exception as e:
         print(f"Avatar error: {e}")
         return None
-
+    
 def resize_and_crop(img_path):
     img = Image.open(img_path).convert("RGBA")
     img_aspect = img.width / img.height
@@ -304,7 +353,7 @@ def create_carousel_cover(img_path, location, specs, tagline, price, base_dir):
     
     return base_img.convert("RGB")
 def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_dir, headshot_path=None, logo_path=None):
-    img = Image.new('RGB', (IG_WIDTH, IG_HEIGHT), (25, 27, 30))
+    img = Image.new('RGB', (IG_WIDTH, IG_HEIGHT), (16, 41, 90))
     draw = ImageDraw.Draw(img)
     
     font_xl = get_font("Playfair-Bold", 100, base_dir)
@@ -320,7 +369,9 @@ def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_d
     x_r = (IG_WIDTH - (bbox_r[2] - bbox_r[0])) / 2
     draw.text((x_r, y), text_ready, font=font_xl, fill=(255, 255, 255))
     y += 180
-    
+
+    print("HEADSHOT PATH:", headshot_path)
+    print("HEADSHOT EXISTS:", os.path.exists(headshot_path) if headshot_path else False)
     if headshot_path and os.path.exists(headshot_path):
         avatar_size = 400
         avatar = create_circular_avatar(headshot_path, avatar_size)
@@ -338,8 +389,8 @@ def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_d
         draw.text((x, y_pos), text, font=font, fill=color)
         return y_pos + (bbox[3] - bbox[1]) + 20
 
-    y = draw_c(agent_name.upper() if agent_name else "AGENT NAME", font_large, y, (255, 255, 255))
-    y = draw_c("Licensed Real Estate Broker (IL)", font_small, y, (150, 150, 150))
+    y = draw_c(agent_name.upper() if agent_name else "Bernardo Jimenez", font_large, y, (255, 255, 255))
+    y = draw_c("Let's Get Started On Your Real Estate Goals!", font_medium, y, (250, 250, 250))
     y += 20
     
     if phone: y = draw_c(phone, font_medium, y, (200, 200, 200))
@@ -349,13 +400,13 @@ def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_d
     if logo_path and os.path.exists(logo_path):
         try:
             logo_img = Image.open(logo_path).convert("RGBA")
-            logo_img.thumbnail((400, 140), Image.Resampling.LANCZOS)
+            logo_img.thumbnail((500, 300), Image.Resampling.LANCZOS)
             lx = int((IG_WIDTH - logo_img.width) / 2)
             img.paste(logo_img, (lx, int(y)), mask=logo_img)
             y += logo_img.height + 30
         except: pass
         
-    y = draw_c(brokerage.upper() if brokerage else "BROKERAGE NAME", font_medium, y, (255, 255, 255))
+    y = draw_c(brokerage.upper() if brokerage else "", font_medium, y, (255, 255, 255))
     
     # 5. Programmatic Vector EHO Logo & MLS Compliance Footer (FIXED TYPO HERE)
     footer_y = IG_HEIGHT - 130
@@ -366,6 +417,8 @@ def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_d
     draw.text(((IG_WIDTH - (bbox_m[2] - bbox_m[0])) / 2, footer_y + 65), mls_text, font=font_tiny, fill=(100, 100, 100))
 
     return img
+
+
 # --- VIDEO GENERATORS ---
 def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None, hide_exact_addr=False):
     if not show_details and not show_price: return []

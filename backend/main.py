@@ -2,6 +2,7 @@ import os
 import uuid
 import asyncio
 import io
+import os
 import zipfile
 from typing import List, Optional
 from fastapi import FastAPI, BackgroundTasks, HTTPException
@@ -25,6 +26,8 @@ supabase_url: str = os.getenv("SUPABASE_URL")
 supabase_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 supabase: Client = create_client(supabase_url, supabase_key) if supabase_url and supabase_key else None
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+headshot_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "headshot.jpg")
 
 def get_base_url():
     domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
@@ -232,6 +235,7 @@ async def get_job_status(job_id: str):
     if not job: raise HTTPException(status_code=404, detail="Job not found")
     return job
 
+
 @app.post("/api/generate-carousel")
 async def generate_carousel(req: RenderRequest):
     try:
@@ -254,10 +258,26 @@ async def generate_carousel(req: RenderRequest):
             social_handle = req.meta.social_handle if req.meta else ""
             price = req.meta.price if req.meta else ""
             
-            # Extract Headshot and Logo for End Card
-            logo_path = None
-            headshot_path = None
+            # --- LOCAL ASSETS CHECK (HEADSHOT & LOGO) ---
+            # 1. Headshot
+            local_headshot = None
+            for ext in ["headshot.jpg", "headshot.jpeg", "headshot.png", "headshot.webp"]:
+                candidate = os.path.join(BASE_DIR, "assets", ext)
+                if os.path.exists(candidate):
+                    local_headshot = candidate
+                    break
+            headshot_path = local_headshot
+
+            # 2. Brokerage / Brand Logo
+            local_logo = None
+            for ext in ["logo.png", "logo.jpg", "logo.jpeg", "logo.webp"]:
+                candidate = os.path.join(BASE_DIR, "assets", ext)
+                if os.path.exists(candidate):
+                    local_logo = candidate
+                    break
+            logo_path = local_logo
             
+            # Frontend uploads override local default assets
             if req.logo_data and ',' in req.logo_data:
                 logo_data = base64.b64decode(req.logo_data.split(',', 1)[1])
                 logo_path = os.path.join(BASE_DIR, f"temp_c_logo_{job_id}.png")
@@ -275,15 +295,15 @@ async def generate_carousel(req: RenderRequest):
                 cover_img.save(img_byte_arr, format='JPEG', quality=95)
                 zip_file.writestr("01_cover.jpg", img_byte_arr.getvalue())
             
-            # 2. Generate Interiors
+            # 2. Generate Interiors (up to 18 interior slides)
             if req.scenes and len(req.scenes) > 1:
-                for i, scene in enumerate(req.scenes[1:9]): 
+                for i, scene in enumerate(req.scenes[1:19]): 
                     slide_img = resize_and_crop(scene.image_path).convert("RGB")
                     img_byte_arr = io.BytesIO()
                     slide_img.save(img_byte_arr, format='JPEG', quality=90)
                     zip_file.writestr(f"{i+2:02d}_interior.jpg", img_byte_arr.getvalue())
                 
-            # 3. Generate End Card
+            # 3. Generate End Card with both headshot & logo
             end_card = create_carousel_end_card(agent, brokerage, phone, social_handle, BASE_DIR, headshot_path, logo_path)
             img_byte_arr = io.BytesIO()
             end_card.save(img_byte_arr, format='JPEG', quality=95)
@@ -292,10 +312,12 @@ async def generate_carousel(req: RenderRequest):
         zip_buffer.seek(0)
         safe_addr = "".join(c for c in address if c.isalnum() or c in " ,_-").replace(" ", "_")
         
-        # Cleanup temp files
+        # Cleanup temporary files (safely preserves permanent files in backend/assets/)
         try:
-            if logo_path and os.path.exists(logo_path): os.remove(logo_path)
-            if headshot_path and os.path.exists(headshot_path): os.remove(headshot_path)
+            if logo_path and "temp_c_logo_" in logo_path and os.path.exists(logo_path): 
+                os.remove(logo_path)
+            if headshot_path and "temp_hs_" in headshot_path and os.path.exists(headshot_path): 
+                os.remove(headshot_path)
         except: pass
         
         return Response(
