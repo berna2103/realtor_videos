@@ -328,3 +328,64 @@ async def generate_carousel(req: RenderRequest):
     except Exception as e:
         print(f"Carousel Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- PROFILE & SETTINGS ENDPOINTS ---
+
+class ProfileUpdate(BaseModel):
+    user_id: str
+    agent_name: Optional[str] = None
+    brokerage: Optional[str] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    social_handle: Optional[str] = None
+    headshot_data: Optional[str] = None # Base64 from frontend
+    logo_data: Optional[str] = None     # Base64 from frontend
+
+@app.get("/api/profile/{user_id}")
+async def get_profile(user_id: str):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not configured.")
+    
+    res = supabase.table("user_profiles").select("*").eq("user_id", user_id).execute()
+    if res.data:
+        return res.data[0]
+    return {}
+
+@app.post("/api/profile")
+async def update_profile(req: ProfileUpdate):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not configured.")
+        
+    update_data = {
+        "user_id": req.user_id,
+        "agent_name": req.agent_name,
+        "brokerage": req.brokerage,
+        "phone": req.phone,
+        "website": req.website,
+        "social_handle": req.social_handle
+    }
+    
+    # Helper to upload base64 images directly to Supabase Storage
+    def upload_b64(b64_str, filename):
+        header, encoded = b64_str.split(",", 1)
+        file_data = base64.b64decode(encoded)
+        content_type = header.split(":")[1].split(";")[0]
+        path = f"{req.user_id}/{filename}"
+        
+        supabase.storage.from_("brand_assets").upload(
+            path=path, 
+            file=file_data, 
+            file_options={"content-type": content_type, "upsert": "true"}
+        )
+        return supabase.storage.from_("brand_assets").get_public_url(path)
+
+    # If the user uploaded a new image, save it to the cloud
+    if req.headshot_data and req.headshot_data.startswith("data:image"):
+        update_data["headshot_url"] = upload_b64(req.headshot_data, "headshot.jpg")
+        
+    if req.logo_data and req.logo_data.startswith("data:image"):
+        update_data["logo_url"] = upload_b64(req.logo_data, "logo.png")
+        
+    # Upsert the profile into the database
+    res = supabase.table("user_profiles").upsert(update_data).execute()
+    return {"success": True, "profile": res.data[0] if res.data else {}}

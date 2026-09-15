@@ -357,10 +357,10 @@ def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_d
     draw = ImageDraw.Draw(img)
     
     font_xl = get_font("Playfair-Bold", 100, base_dir)
-    font_large = get_font("Montserrat", 50, base_dir)
-    font_medium = get_font("Montserrat", 40, base_dir)
+    font_large = get_font("Roboto", 60, base_dir)
+    font_medium = get_font("Roboto", 40, base_dir)
     font_small = get_font("Montserrat", 28, base_dir)
-    font_tiny = get_font("Montserrat", 20, base_dir)
+    font_tiny = get_font("Montserrat", 10, base_dir)
     
     y = 120
     
@@ -390,17 +390,17 @@ def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_d
         return y_pos + (bbox[3] - bbox[1]) + 20
 
     y = draw_c(agent_name.upper() if agent_name else "Bernardo Jimenez", font_large, y, (255, 255, 255))
-    y = draw_c("Let's Get Started On Your Real Estate Goals!", font_medium, y, (250, 250, 250))
+    y = draw_c("Let's Get Started On Your Real Estate Goals!", font_medium, y, (255, 255, 255))
     y += 20
     
     if phone: y = draw_c(phone, font_medium, y, (200, 200, 200))
-    if social_handle: y = draw_c(f"IG: {social_handle}", font_medium, y, (200, 200, 200))
+    if social_handle: y = draw_c(f"IG: {social_handle}", font_medium, y, (245, 245, 245))
     y += 50
     
     if logo_path and os.path.exists(logo_path):
         try:
             logo_img = Image.open(logo_path).convert("RGBA")
-            logo_img.thumbnail((500, 300), Image.Resampling.LANCZOS)
+            logo_img.thumbnail((600, 400), Image.Resampling.LANCZOS)
             lx = int((IG_WIDTH - logo_img.width) / 2)
             img.paste(logo_img, (lx, int(y)), mask=logo_img)
             y += logo_img.height + 30

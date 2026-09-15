@@ -27,7 +27,9 @@ import {
   Phone,
   RefreshCw,
   LayoutDashboard,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Instagram, // Added for Social Handle
+  User       // Added for UI consistency
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -85,6 +87,7 @@ interface Scene {
   enable_vo: boolean;
 }
 
+// Added social_handle and headshot_data to the Meta interface
 interface Meta {
   address: string;
   price: string;
@@ -100,6 +103,8 @@ interface Meta {
   custom_cta?: string;
   custom_end_title?: string;
   custom_tagline?: string;
+  social_handle?: string;
+  headshot_data?: string;
 }
 
 const RENDER_MESSAGES = [
@@ -191,6 +196,24 @@ const SidebarSettings = ({
             />
           </div>
         </div>
+
+        {/* --- ADDED INSTAGRAM HANDLE --- */}
+        <div className="space-y-2">
+          <label className="text-[11px] text-slate-500 font-bold uppercase ml-1 block">
+            Instagram Handle
+          </label>
+          <div className="relative">
+            <Instagram className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="@bernardojimenez"
+              value={meta.social_handle || ""}
+              onChange={(e) => setMeta({ ...meta, social_handle: e.target.value })}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 pl-10 text-sm text-slate-900 outline-none focus:border-blue-500 focus:bg-white transition-all shadow-sm"
+            />
+          </div>
+        </div>
+
         <div className="space-y-2">
           <label className="text-[11px] text-slate-500 font-bold uppercase ml-1 block">
             Custom Call-to-Action (Optional)
@@ -202,6 +225,46 @@ const SidebarSettings = ({
             onChange={(e) => setMeta({ ...meta, custom_cta: e.target.value })}
             className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm"
           />
+        </div>
+
+        {/* --- ADDED HEADSHOT UPLOAD --- */}
+        <div className="space-y-3">
+          <span className="text-[11px] text-slate-500 font-bold uppercase ml-1 block">
+            Agent Headshot
+          </span>
+          {meta.headshot_data ? (
+            <div className="relative group rounded-2xl overflow-hidden bg-slate-200 border border-slate-200 p-2 shadow-md flex items-center justify-center min-h-[100px] transition-all">
+              <img
+                src={meta.headshot_data}
+                className="max-h-20 w-auto object-cover rounded-full shadow-sm"
+                alt="Headshot preview"
+              />
+              <button
+                onClick={() => setMeta({ ...meta, headshot_data: "" })}
+                className="absolute top-3 right-3 p-1.5 bg-red-50 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 bg-slate-50 py-8 rounded-2xl hover:border-blue-400 hover:bg-white transition-all cursor-pointer group">
+              <Upload className="w-6 h-6 text-slate-400 group-hover:text-blue-600 mb-2 transition-colors" />
+              <span className="text-xs font-bold text-slate-600">Upload Photo</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => setMeta({ ...meta, headshot_data: reader.result as string });
+                    reader.readAsDataURL(file);
+                  }
+                }}
+                className="hidden"
+              />
+            </label>
+          )}
         </div>
 
         <div className="space-y-3 ">
@@ -415,6 +478,8 @@ export default function CinematicListingApp() {
     website: "",
     mls_source: "",
     mls_number: "",
+    social_handle: "",
+    headshot_data: "",
   });
   const [scenes, setScenes] = useState<Scene[]>([]);
 
@@ -464,6 +529,39 @@ export default function CinematicListingApp() {
 
   // Carousel Entries
   const [customTagline, setCustomTagline] = useState(" ");
+
+  // --- ADDED: Auto-load Profile Data from Supabase when User logs in ---
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fetchSavedProfile = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/profile/${user.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          // If the user has saved data, automatically populate the form!
+          if (data && Object.keys(data).length > 0) {
+            setMeta((prev) => ({
+              ...prev,
+              agent: data.agent_name || prev.agent,
+              brokerage: data.brokerage || prev.brokerage,
+              phone: data.phone || prev.phone,
+              website: data.website || prev.website,
+              social_handle: data.social_handle || prev.social_handle,
+              headshot_data: data.headshot_url || prev.headshot_data,
+            }));
+            if (data.logo_url) {
+              setLogoData(data.logo_url);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("No saved profile found or backend offline.", error);
+      }
+    };
+
+    fetchSavedProfile();
+  }, [user?.id]);
 
 
   // Sync Voice and Language for Spanish
@@ -891,7 +989,8 @@ const handleDownloadCarousel = async () => {
         </div>
       )}
 
-      {/* --- TOP NAVIGATION --- */}
+      
+    {/* --- TOP NAVIGATION --- */}
       <nav className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur-xl flex items-center justify-between px-4 sm:px-8 z-30 relative">
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="bg-slate-900 p-1.5 sm:p-2 rounded-xl shadow-lg shadow-slate-200">
@@ -924,18 +1023,29 @@ const handleDownloadCarousel = async () => {
             <div className="flex items-center gap-1 sm:gap-4 shrink-0">
               <Link
                 href="/dashboard"
-                className="lg:hidden p-1.5 sm:p-2 text-slate-400 hover:text-blue-600 transition-colors"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-blue-600 transition-colors hidden sm:block"
+                title="Dashboard"
               >
                 <LayoutDashboard className="w-5 h-5" />
               </Link>
 
-              <span className="text-sm text-slate-500 hidden md:block font-medium">
+              {/* NEW SETTINGS LINK ADDED HERE */}
+              <Link
+                href="/settings"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-blue-600 transition-colors"
+                title="Account Settings"
+              >
+                <User className="w-5 h-5" />
+              </Link>
+
+              <span className="text-sm text-slate-500 hidden md:block font-medium border-l border-slate-200 pl-4">
                 {userEmail}
               </span>
 
               <button
                 onClick={signOut}
                 className="p-1.5 sm:p-2 text-slate-400 hover:text-red-500 transition-colors"
+                title="Sign Out"
               >
                 <LogOut className="w-5 h-5" />
               </button>
