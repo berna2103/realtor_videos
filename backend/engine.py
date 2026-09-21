@@ -279,33 +279,33 @@ def create_circular_avatar(path, size, border_width=4, border_color=(34, 197, 94
         print(f"Avatar error: {e}")
         return None
     
-def resize_and_crop(img_path):
+def resize_and_crop(img_path, target_w=1080, target_h=1350):
     img = Image.open(img_path).convert("RGBA")
     img_aspect = img.width / img.height
-    target_aspect = IG_WIDTH / IG_HEIGHT
+    target_aspect = target_w / target_h
     if img_aspect > target_aspect:
-        new_height = IG_HEIGHT
+        new_height = target_h
         new_width = int(new_height * img_aspect)
     else:
-        new_width = IG_WIDTH
+        new_width = target_w
         new_height = int(new_width / img_aspect)
     img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-    left = (new_width - IG_WIDTH) / 2
-    top = (new_height - IG_HEIGHT) / 2
-    return img.crop((left, top, left + IG_WIDTH, top + IG_HEIGHT))
+    left = (new_width - target_w) / 2
+    top = (new_height - target_h) / 2
+    return img.crop((left, top, left + target_w, top + target_h))
 
-def create_carousel_cover(img_path, location, specs, tagline, price, base_dir):
-    base_img = resize_and_crop(img_path)
+def create_carousel_cover(img_path, location, specs, tagline, price, base_dir, target_w=1080, target_h=1350):
+    base_img = resize_and_crop(img_path, target_w, target_h)
     
-    # 1. Custom Scrim: Only covers the bottom 1/3rd of the image
-    scrim = Image.new('RGBA', (IG_WIDTH, IG_HEIGHT), (0,0,0,0))
+    scrim = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
     scrim_draw = ImageDraw.Draw(scrim)
     
-    start_y = int(IG_HEIGHT * 0.66)
-    for y in range(start_y, IG_HEIGHT):
-        progress = (y - start_y) / (IG_HEIGHT - start_y)
+    # Start gradient higher if it's a Reel to cover the extra safe-zone padding
+    start_y = int(target_h * 0.55) if target_h > 1500 else int(target_h * 0.66)
+    for y in range(start_y, target_h):
+        progress = (y - start_y) / (target_h - start_y)
         alpha = int(220 * (progress ** 1.5))
-        scrim_draw.line([(0, y), (IG_WIDTH, y)], fill=(0, 0, 0, alpha))
+        scrim_draw.line([(0, y), (target_w, y)], fill=(0, 0, 0, alpha))
         
     base_img.paste(scrim, (0, 0), scrim)
     
@@ -316,19 +316,21 @@ def create_carousel_cover(img_path, location, specs, tagline, price, base_dir):
     font_specs = get_font("Montserrat-Bold", 45, base_dir)        
     font_price = get_font("Montserrat-Bold", 85, base_dir)        
     
-    y_specs = IG_HEIGHT - 120
+    # REEL SAFE ZONE: Push text up 350px so IG/TikTok captions don't cover it
+    bottom_padding = 380 if target_h > 1500 else 120
+    y_specs = target_h - bottom_padding
     y_location = y_specs - 150
     y_tagline = y_location - 60
     
     def draw_centered(text, font, y, fill=(255, 255, 255, 255), stroke=1):
         bbox = draw.textbbox((0, 0), text, font=font)
-        x = (IG_WIDTH - (bbox[2] - bbox[0])) / 2
+        x = (target_w - (bbox[2] - bbox[0])) / 2
         draw.text((x, y), text, font=font, fill=fill, stroke_width=stroke, stroke_fill=fill)
     
     # 2. Draw Top Price 
     if price:
         p_str = f"${int(float(str(price).replace('$', '').replace(',', ''))):,}"
-        draw_centered(p_str, font_price, 80, stroke=2)
+        draw_centered(p_str, font_price, 80 if target_h < 1500 else 140, stroke=2)
     
     # 3. Draw Bottom Details
     loc_text = location.upper()
@@ -338,13 +340,11 @@ def create_carousel_cover(img_path, location, specs, tagline, price, base_dir):
     
     pin_size = 85
     total_w = pin_size + 25 + loc_w
-    start_x = (IG_WIDTH - total_w) / 2
+    start_x = (target_w - total_w) / 2
     
-    # FIX: Pushed the pin down. We calculate 90% of the text height so the tip rests perfectly on the baseline.
     pin_y = y_location + int(loc_h * 0.90) 
     draw_vector_map_pin(draw, start_x + (pin_size//2), pin_y, scale=1.2)
     
-    # Flat Location Text
     text_x = start_x + pin_size + 25
     draw.text((text_x, y_location), loc_text, font=font_location, fill=(255, 255, 255, 255), stroke_width=1, stroke_fill=(255, 255, 255, 255))
     
@@ -352,31 +352,36 @@ def create_carousel_cover(img_path, location, specs, tagline, price, base_dir):
     draw_centered(tagline.upper(), font_tagline, y_tagline, stroke=1)
     
     return base_img.convert("RGB")
-def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_dir, headshot_path=None, logo_path=None):
-    img = Image.new('RGB', (IG_WIDTH, IG_HEIGHT), (16, 41, 90))
+
+def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_dir, headshot_path=None, logo_path=None, target_w=1080, target_h=1350, theme_color="#10295A"):
+    # Convert hex color to RGB for Pillow, fallback to Powersuit Blue
+    try:
+        bg_color = hex_to_rgb(theme_color)
+    except:
+        bg_color = (16, 41, 90) 
+        
+    img = Image.new('RGB', (target_w, target_h), bg_color)
     draw = ImageDraw.Draw(img)
     
     font_xl = get_font("Playfair-Bold", 100, base_dir)
-    font_large = get_font("Roboto", 60, base_dir)
-    font_medium = get_font("Roboto", 40, base_dir)
+    font_large = get_font("Roboto-Bold", 50, base_dir)
+    font_medium = get_font("Roboto-Bold", 40, base_dir)
     font_small = get_font("Montserrat", 28, base_dir)
-    font_tiny = get_font("Montserrat", 10, base_dir)
+    font_tiny = get_font("Montserrat", 20, base_dir)
     
-    y = 120
+    y = 120 if target_h < 1500 else 200
     
     text_ready = "Ready to Tour?"
     bbox_r = draw.textbbox((0, 0), text_ready, font=font_xl)
-    x_r = (IG_WIDTH - (bbox_r[2] - bbox_r[0])) / 2
+    x_r = (target_w - (bbox_r[2] - bbox_r[0])) / 2
     draw.text((x_r, y), text_ready, font=font_xl, fill=(255, 255, 255))
     y += 180
-
-    print("HEADSHOT PATH:", headshot_path)
-    print("HEADSHOT EXISTS:", os.path.exists(headshot_path) if headshot_path else False)
+    
     if headshot_path and os.path.exists(headshot_path):
         avatar_size = 400
         avatar = create_circular_avatar(headshot_path, avatar_size)
         if avatar:
-            ax = int((IG_WIDTH - avatar_size) / 2)
+            ax = int((target_w - avatar_size) / 2)
             img.paste(avatar, (ax, int(y)), mask=avatar)
             y += avatar_size + 50
     else:
@@ -385,40 +390,40 @@ def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_d
     def draw_c(text, font, y_pos, color):
         if not text: return y_pos
         bbox = draw.textbbox((0, 0), text, font=font)
-        x = (IG_WIDTH - (bbox[2] - bbox[0])) / 2
+        x = (target_w - (bbox[2] - bbox[0])) / 2
         draw.text((x, y_pos), text, font=font, fill=color)
         return y_pos + (bbox[3] - bbox[1]) + 20
 
-    y = draw_c(agent_name.upper() if agent_name else "Bernardo Jimenez", font_large, y, (255, 255, 255))
-    y = draw_c("Let's Get Started On Your Real Estate Goals!", font_medium, y, (255, 255, 255))
+    y = draw_c(agent_name.upper() if agent_name else " ", font_large, y, (255, 255, 255))
+    
+    # Softened the gray so it contrasts well against Powersuit Blue
+    y = draw_c("Licensed Real Estate Broker (IL)", font_small, y, (180, 180, 190))
     y += 20
     
-    if phone: y = draw_c(phone, font_medium, y, (200, 200, 200))
-    if social_handle: y = draw_c(f"IG: {social_handle}", font_medium, y, (245, 245, 245))
+    if phone: y = draw_c(phone, font_medium, y, (220, 220, 230))
+    if social_handle: y = draw_c(f"IG: {social_handle}", font_medium, y, (220, 220, 230))
     y += 50
     
     if logo_path and os.path.exists(logo_path):
         try:
             logo_img = Image.open(logo_path).convert("RGBA")
-            logo_img.thumbnail((600, 400), Image.Resampling.LANCZOS)
-            lx = int((IG_WIDTH - logo_img.width) / 2)
+            logo_img.thumbnail((400, 140), Image.Resampling.LANCZOS)
+            lx = int((target_w - logo_img.width) / 2)
             img.paste(logo_img, (lx, int(y)), mask=logo_img)
             y += logo_img.height + 30
         except: pass
         
-    y = draw_c(brokerage.upper() if brokerage else "", font_medium, y, (255, 255, 255))
+    y = draw_c(brokerage.upper() if brokerage else "BROKERAGE NAME", font_medium, y, (255, 255, 255))
     
-    # 5. Programmatic Vector EHO Logo & MLS Compliance Footer (FIXED TYPO HERE)
-    footer_y = IG_HEIGHT - 130
-    draw_vector_eho_logo(draw, get_font, (IG_WIDTH//2) - 130, footer_y, size=45, base_dir=base_dir)
+    footer_y = target_h - (350 if target_h > 1500 else 130)
+    draw_vector_eho_logo(draw, get_font, (target_w//2) - 130, footer_y, size=45, base_dir=base_dir)
     
     mls_text = "REALTOR® | Information deemed reliable but not guaranteed."
     bbox_m = draw.textbbox((0, 0), mls_text, font=font_tiny)
-    draw.text(((IG_WIDTH - (bbox_m[2] - bbox_m[0])) / 2, footer_y + 65), mls_text, font=font_tiny, fill=(100, 100, 100))
+    # Brightened footer text slightly for legibility on dark blue
+    draw.text(((target_w - (bbox_m[2] - bbox_m[0])) / 2, footer_y + 65), mls_text, font=font_tiny, fill=(160, 160, 170))
 
     return img
-
-
 # --- VIDEO GENERATORS ---
 def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None, hide_exact_addr=False):
     if not show_details and not show_price: return []
@@ -441,23 +446,39 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
     
     y_status = int(th * 0.22) if logo_path else int(th * 0.20)
     y_price, y_pill, y_addr, y_agent, y_cta = int(th * 0.32), int(th * 0.55), int(th * 0.64), int(th * 0.71), int(th * 0.78)
-    status_font_size = int(th * 0.080)
-    f_status = get_font(font_choice, status_font_size, base_dir)
-    f_price = get_font(font_choice, int(th * 0.050), base_dir)
-    f_pill = get_font(font_choice, int(th * 0.022), base_dir)
-    f_addr = get_font(font_choice, int(th * 0.024), base_dir)
-    f_agent = get_font(font_choice, int(th * 0.028), base_dir) 
-    f_cta = get_font(font_choice, int(th * 0.035), base_dir)   
-
+    
+    # --- AUTOSCALE LOGIC FOR VERTICAL REELS ---
+    # 1. Status Text ("Home For Sale")
     if status:
-        bbox = draw.textbbox((0, 0), status.strip(), font=f_status)
-        draw_text_with_shadow(draw, ((tw - (bbox[2] - bbox[0])) // 2, y_status), status.strip(), f_status, color_white)
+        status_font_size = int(th * 0.080)
+        f_status = get_font(font_choice, status_font_size, base_dir)
+        status_text = status.strip()
+        bbox = draw.textbbox((0, 0), status_text, font=f_status)
+        
+        # Shrink font if wider than 90% of screen width
+        while (bbox[2] - bbox[0]) > (tw * 0.9):
+            status_font_size -= 4
+            f_status = get_font(font_choice, status_font_size, base_dir)
+            bbox = draw.textbbox((0, 0), status_text, font=f_status)
+            
+        draw_text_with_shadow(draw, ((tw - (bbox[2] - bbox[0])) // 2, y_status), status_text, f_status, color_white)
 
+    # 2. Price Text
     if show_price and price:
+        p_font_size = int(th * 0.050)
+        f_price = get_font(font_choice, p_font_size, base_dir)
         p_str = f"${int(float(str(price).replace('$', '').replace(',', ''))):,}"
         bbox = draw.textbbox((0, 0), p_str, font=f_price)
+        
+        while (bbox[2] - bbox[0]) > (tw * 0.9):
+            p_font_size -= 4
+            f_price = get_font(font_choice, p_font_size, base_dir)
+            bbox = draw.textbbox((0, 0), p_str, font=f_price)
+            
         draw_text_with_shadow(draw, ((tw - (bbox[2] - bbox[0])) // 2, y_price), p_str, f_price, color_white)
 
+    # 3. Property Details Pills (Beds, Baths, Sqft)
+    f_pill = get_font(font_choice, int(th * 0.022), base_dir)
     if show_details:
         details = []
         if beds: details.append(('bed', str(beds) + " beds"))
@@ -473,6 +494,7 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
                 blocks_data.append((icon_type, txt_val, block_w))
                 total_content_width += block_w
             pill_w = total_content_width + (len(details) - 1) * gap_items + (ext_padding * 2)
+            
             px, py = (tw - pill_w) // 2, y_pill
             draw.rounded_rectangle([px, py, px + pill_w, py + pill_h], radius=pill_h // 2, fill=color_pill_fill, outline=color_pill_outline, width=2)
             curr_x, icon_center_y = px + ext_padding, py + (pill_h // 2)
@@ -484,23 +506,50 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
                 draw.text((curr_x, py + (pill_h - (txt_bbox[3] - txt_bbox[1])) // 2 - int(th * 0.005)), txt_val, font=f_pill, fill=color_light_gray)
                 curr_x += (block_w - icon_draw_scale - gap_icon_text) + gap_items
 
+    # 4. Address Text
     display_addr = format_address(addr, hide_exact_addr)
     if display_addr:
+        addr_size = int(th * 0.024)
+        f_addr = get_font(font_choice, addr_size, base_dir)
         bbox = draw.textbbox((0, 0), display_addr, font=f_addr)
+        
+        while (bbox[2] - bbox[0]) > (tw * 0.9):
+            addr_size -= 2
+            f_addr = get_font(font_choice, addr_size, base_dir)
+            bbox = draw.textbbox((0, 0), display_addr, font=f_addr)
+            
         draw_text_with_shadow(draw, ((tw - (bbox[2] - bbox[0])) // 2, y_addr), display_addr, f_addr, color_light_gray)
 
+    # 5. Agent Phone
     if phone:
+        agent_size = int(th * 0.028)
+        f_agent = get_font(font_choice, agent_size, base_dir)
         txt = f"Agent Contact: {phone}"
         bbox = draw.textbbox((0, 0), txt, font=f_agent)
+        
+        while (bbox[2] - bbox[0]) > (tw * 0.9):
+            agent_size -= 2
+            f_agent = get_font(font_choice, agent_size, base_dir)
+            bbox = draw.textbbox((0, 0), txt, font=f_agent)
+            
         draw_text_with_shadow(draw, ((tw - (bbox[2] - bbox[0])) // 2, y_agent), txt, f_agent, (255, 255, 255, 255))
 
+    # 6. CTA Button
     cta_text = get_dynamic_cta(status, lang, custom_cta)
+    cta_size = int(th * 0.035)
+    f_cta = get_font(font_choice, cta_size, base_dir)
     bbox = draw.textbbox((0, 0), cta_text, font=f_cta)
+    
+    while (bbox[2] - bbox[0]) > (tw * 0.85): # Needs more padding for the button body
+        cta_size -= 2
+        f_cta = get_font(font_choice, cta_size, base_dir)
+        bbox = draw.textbbox((0, 0), cta_text, font=f_cta)
+        
     text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
     x_pos = (tw - text_w) // 2
     pad_x, pad_y = int(tw * 0.04), int(th * 0.015)
     
-    draw.rounded_rectangle([x_pos - pad_x, y_cta - pad_y, x_pos + text_w + pad_x, y_cta + text_h + pad_y], radius=int(th * 0.015), fill=theme_color if theme_color else (220, 50, 50, 255))
+    draw.rounded_rectangle([x_pos - pad_x, y_cta - pad_y, x_pos + text_w + pad_x, y_cta + text_h + pad_y], radius=int(th * 0.015), fill=theme_color if theme_color else "#10295A")
     draw_text_with_shadow(draw, (x_pos, y_cta - bbox[1]), cta_text, f_cta, color_white)
 
     temp = os.path.join(base_dir, f"temp_title_{job_id}.png")
@@ -549,51 +598,86 @@ def create_glass_caption(job_id, text, duration, target_w, target_h, font_choice
         
     return layers
 
-def create_video_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, website, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir, is_own_listing, status, custom_cta=None, logo_path=None):
-    img_bg = Image.new('RGB', (target_w, target_h), (10, 10, 12)) 
-    ImageDraw.Draw(img_bg).rectangle([0, 0, target_w, 6], fill=hex_to_rgb(theme_color))
+def create_video_end_screen(job_id, target_w, target_h, agent_name, brokerage, phone, website, duration, language, mls_source, mls_number, font_choice, theme_color, base_dir, is_own_listing, status, custom_cta=None, logo_path=None, social_handle=None, headshot_path=None):
+    # Convert hex color to RGB for Pillow, fallback to Powersuit Blue
+    try:
+        bg_color = hex_to_rgb(theme_color)
+    except:
+        bg_color = (16, 41, 90)
+        
+    img = Image.new('RGB', (target_w, target_h), bg_color)
+    draw = ImageDraw.Draw(img)
+    
+    # Dynamically scale sizes so it looks perfect in Vertical, Square, or Landscape videos
+    scale = target_h / 1350.0
+    
+    font_xl = get_font("Playfair-Bold", int(100 * scale), base_dir)
+    font_large = get_font("Montserrat", int(70 * scale), base_dir)
+    font_medium = get_font("Montserrat", int(40 * scale), base_dir)
+    font_small = get_font("Montserrat", int(28 * scale), base_dir)
+    font_tiny = get_font("Montserrat", int(20 * scale), base_dir)
+    
+    y = int(120 * scale) if target_h < 1500 else int(200 * scale)
+    
+    cta_text = get_dynamic_cta(status, language, custom_cta) if custom_cta else "READY TO TOUR?"
+    bbox_r = draw.textbbox((0, 0), cta_text, font=font_xl)
+    draw.text(((target_w - (bbox_r[2] - bbox_r[0])) / 2, y), cta_text, font=font_xl, fill=(255, 255, 255))
+    y += int(150 * scale)
+    
+    if headshot_path and os.path.exists(headshot_path):
+        # Shrink the avatar slightly if it's a wide landscape video so it fits safely
+        avatar_size = int(350 * scale) if target_w < target_h else int(250 * scale)
+        avatar = create_circular_avatar(headshot_path, avatar_size)
+        if avatar:
+            ax = int((target_w - avatar_size) / 2)
+            img.paste(avatar, (ax, y), mask=avatar)
+            y += avatar_size + int(40 * scale)
+    else:
+        y += int(80 * scale)
+        
+    def draw_c(text, font, y_pos, color):
+        if not text: return y_pos
+        bbox = draw.textbbox((0, 0), text, font=font)
+        draw.text(((target_w - (bbox[2] - bbox[0])) / 2, y_pos), text, font=font, fill=color)
+        return y_pos + (bbox[3] - bbox[1]) + int(20 * scale)
 
+    y = draw_c(agent_name.upper() if agent_name else "", font_large, y, (255, 255, 255))
+    y = draw_c("Licensed Real Estate Broker (IL)", font_small, y, (180, 180, 190))
+    y += int(20 * scale)
+    
+    if phone: y = draw_c(phone, font_medium, y, (220, 220, 230))
+    if social_handle: y = draw_c(f"IG: {social_handle}", font_medium, y, (220, 220, 230))
+    elif website: y = draw_c(website, font_medium, y, (220, 220, 230))
+    
+    y += int(40 * scale)
+    
     if logo_path and os.path.exists(logo_path):
         try:
             logo_img = Image.open(logo_path).convert("RGBA")
-            logo_img.thumbnail((int(target_w * 0.4), int(target_h * 0.15)), Image.Resampling.LANCZOS)
-            img_bg.paste(logo_img, ((target_w - logo_img.width) // 2, int(target_h * 0.08)), logo_img) 
+            logo_img.thumbnail((int(400 * scale), int(140 * scale)), Image.Resampling.LANCZOS)
+            lx = int((target_w - logo_img.width) / 2)
+            img.paste(logo_img, (lx, y), mask=logo_img)
+            y += logo_img.height + int(30 * scale)
         except: pass
-
-    temp_bg = os.path.join(base_dir, f"temp_end_bg_{job_id}.png") 
-    img_bg.save(temp_bg)
+        
+    y = draw_c(brokerage.upper() if brokerage else "", font_medium, y, (255, 255, 255))
     
-    def _text_clip(text, base_size, color, y, start, job_id, name):
-        if not text: return None
-        font = get_font(font_choice, base_size, base_dir)
-        txt_img = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(txt_img)
-        bbox = draw.textbbox((0, 0), text, font=font)
-        draw.text(((target_w - (bbox[2]-bbox[0])) / 2, y), text, font=font, fill=color)
-        path = os.path.join(base_dir, f"temp_end_txt_{name}_{job_id}.png") 
-        txt_img.save(path)
-        return ImageClip(path).with_start(start).with_duration(max(0.1, duration - start))
-
-    layers, curr_y, fade = [ImageClip(temp_bg).with_duration(duration)], int(target_h * 0.25), 0.5
-    courtesy_text = "Presentado por:" if language == "Spanish" and is_own_listing else "Presented by:" if is_own_listing else "Cortesía de:" if language == "Spanish" else "Listing Courtesy of:"
+    # Draw EHO Vector Logo and MLS Text at the bottom
+    footer_y = target_h - int(130 * scale)
+    draw_vector_eho_logo(draw, get_font, (target_w//2) - int(130 * scale), footer_y, size=int(45 * scale), base_dir=base_dir)
     
-    for t, base_sz, c, n in [
-        (get_dynamic_cta(status, language, custom_cta), int(target_h * 0.045), (160, 160, 170), "cta"), 
-        (phone, int(target_h * 0.065), (255, 255, 255), "ph"), 
-        (website, int(target_h * 0.035), (200, 200, 255), "web"), 
-        (courtesy_text, int(target_h * 0.020), (180, 180, 190), "courtesy"), 
-        (agent_name.upper(), int(target_h * 0.030), (255, 255, 255), "ag"), 
-        (brokerage, int(target_h * 0.022), (140, 140, 150), "br")
-    ]:
-        clip = _text_clip(t, base_sz, c, curr_y, fade, job_id, n)
-        if clip: layers.append(clip)
-        curr_y += 80 if n == "cta" else 110 if n == "ph" else 70 if n == "web" else 30 if n == "courtesy" else 50
-        fade += 0.6
-    
-    mls_clip = _text_clip(f"Source: {mls_source} | MLS# {mls_number}" if (mls_source or mls_number) else "", int(target_h * 0.016), (80, 80, 90), int(target_h * 0.88), 2.5, job_id, "mls")
-    if mls_clip: layers.append(mls_clip)
-    return CompositeVideoClip(layers, size=(target_w, target_h)).with_duration(duration)
+    mls_text = "REALTOR® | Information deemed reliable but not guaranteed."
+    if mls_source or mls_number:
+        mls_text += f" | Source: {mls_source} {mls_number}"
+        
+    bbox_m = draw.textbbox((0, 0), mls_text, font=font_tiny)
+    draw.text(((target_w - (bbox_m[2] - bbox_m[0])) / 2, footer_y + int(65 * scale)), mls_text, font=font_tiny, fill=(160, 160, 170))
 
+    temp_bg = os.path.join(base_dir, f"temp_vid_end_{job_id}.png")
+    img.save(temp_bg)
+    
+    # Return as a seamless ImageClip attached to the end of the video
+    return ImageClip(temp_bg).with_duration(duration)
 async def generate_kokoro_audio_async(text, voice, output_path):
     def _run_kokoro():
         timings = []
@@ -712,9 +796,48 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
     clips, final = [], None
     req_dict = req if isinstance(req, dict) else req.model_dump()
     meta, scenes = req_dict.get('meta', {}), req_dict.get('scenes', [])
-    logo_file_path = None
     actual_custom_cta = req_dict.get('custom_cta') or meta.get('custom_cta')
     status_choice = req_dict.get('status_choice', 'Just Listed')
+    theme_color = req_dict.get('primary_color', '#10295A')
+
+    # --- 1. EXTRACT HEADSHOT & LOGO ---
+    logo_file_path = None
+    if req_dict.get('logo_data'):
+        logo_val = req_dict.get('logo_data')
+        logo_file_path = os.path.join(base_dir, f"temp_logo_{job_id}.png")
+        if logo_val.startswith("http"):
+            try:
+                r = requests.get(logo_val, timeout=15)
+                with open(logo_file_path, "wb") as f: f.write(r.content)
+            except: pass
+        elif ',' in logo_val:
+            l_data = base64.b64decode(logo_val.split(',', 1)[1])
+            Image.open(io.BytesIO(l_data)).save(logo_file_path)
+    else:
+        for ext in ["logo.png", "logo.jpg"]:
+            cand = os.path.join(base_dir, "assets", ext)
+            if os.path.exists(cand):
+                logo_file_path = cand
+                break
+
+    headshot_file_path = None
+    if meta.get('headshot_data'):
+        hs_val = meta.get('headshot_data')
+        headshot_file_path = os.path.join(base_dir, f"temp_v_hs_{job_id}.png")
+        if hs_val.startswith("http"):
+            try:
+                r = requests.get(hs_val, timeout=15)
+                with open(headshot_file_path, "wb") as f: f.write(r.content)
+            except: pass
+        elif ',' in hs_val:
+            h_data = base64.b64decode(hs_val.split(',', 1)[1])
+            Image.open(io.BytesIO(h_data)).save(headshot_file_path)
+    else:
+        for ext in ["headshot.jpg", "headshot.png"]:
+            cand = os.path.join(base_dir, "assets", ext)
+            if os.path.exists(cand):
+                headshot_file_path = cand
+                break
 
     VOICE_MAP = {
         "English-US-Bella": "af_bella",
@@ -780,9 +903,11 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
             job_id, tw, th, meta.get('agent',''), meta.get('brokerage',''), 
             meta.get('phone',''), meta.get('website',''), 5.0, lang, 
             meta.get('mls_source',''), meta.get('mls_number',''), 
-            req_dict.get('font','Roboto'), req_dict.get('primary_color','#552448'), base_dir, 
+            req_dict.get('font','Roboto'), theme_color, base_dir, 
             req_dict.get('is_own_listing', True), status=status_choice, 
-            custom_cta=actual_custom_cta, logo_path=logo_file_path
+            custom_cta=actual_custom_cta, logo_path=logo_file_path,
+            social_handle=meta.get('social_handle', ''),
+            headshot_path=headshot_file_path
         ))
 
         set_progress(job_id, 48)

@@ -83,6 +83,7 @@ class RenderRequest(BaseModel):
     meta: Optional[MetaDef] = None
     scenes: Optional[List[SceneDef]] = None
     format: Optional[str] = "Vertical (1080x1920)"
+    carousel_format: Optional[str] = "4:5 (Standard Post)"
     language: Optional[str] = "English"
     voice: Optional[str] = "English-US-Bella"
     font: Optional[str] = "Inter"
@@ -276,6 +277,31 @@ async def generate_carousel(req: RenderRequest):
                     local_logo = candidate
                     break
             logo_path = local_logo
+
+            tw, th = (1080, 1920) if "9:16" in (req.carousel_format or "") else (1080, 1350)
+
+            # 1. Generate Cover
+            if req.scenes and len(req.scenes) > 0:
+                cover_img = create_carousel_cover(req.scenes[0].image_path, city_state, specs, tagline, price, BASE_DIR, target_w=tw, target_h=th)
+                img_byte_arr = io.BytesIO()
+                cover_img.save(img_byte_arr, format='JPEG', quality=95)
+                zip_file.writestr("01_cover.jpg", img_byte_arr.getvalue())
+            
+            # 2. Generate Interiors 
+            if req.scenes and len(req.scenes) > 1:
+                for i, scene in enumerate(req.scenes[1:19]): 
+                    slide_img = resize_and_crop(scene.image_path, target_w=tw, target_h=th).convert("RGB")
+                    img_byte_arr = io.BytesIO()
+                    slide_img.save(img_byte_arr, format='JPEG', quality=90)
+                    zip_file.writestr(f"{i+2:02d}_interior.jpg", img_byte_arr.getvalue())
+                
+            # 3. Generate End Card
+            end_card = create_carousel_end_card(agent, brokerage, phone, social_handle, BASE_DIR, headshot_path, logo_path, target_w=tw, target_h=th)
+            img_byte_arr = io.BytesIO()
+            end_card.save(img_byte_arr, format='JPEG', quality=95)
+            zip_file.writestr("99_contact.jpg", img_byte_arr.getvalue())
+
+            tw, th = (1080, 1920) if "9:16" in (req.carousel_format or "") else (1080, 1350)
             
             # Frontend uploads override local default assets
             if req.logo_data and ',' in req.logo_data:

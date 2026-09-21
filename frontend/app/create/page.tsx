@@ -493,6 +493,8 @@ export default function CinematicListingApp() {
   const [activeTab, setActiveTab] = useState("instagram");
   const [renderProgress, setRenderProgress] = useState(0);
 
+  const [carouselFormat, setCarouselFormat] = useState("4:5 (Standard Post)"); // ADD THIS
+
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
   const [showCaptions, setShowCaptions] = useState(true);
   const [enableVoice, setEnableVoice] = useState(true);
@@ -886,6 +888,7 @@ const handleDownloadCarousel = async () => {
           scenes: scenes,
           primary_color: primaryColor,
           format: format,
+          carousel_format: carouselFormat,
           language: language,
           voice: voice,
           font: font,
@@ -1511,8 +1514,24 @@ const handleDownloadCarousel = async () => {
               </h3>
               <div className="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm space-y-4">
                 <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                  Instantly download a ready-to-post 10-slide photo carousel formatted perfectly for Instagram (4:5).
+                  Instantly download a ready-to-post photo carousel formatted for Instagram or TikTok.
                 </p>
+                
+                {/* NEW DROPDOWN ADDED HERE */}
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-500 font-bold uppercase block">
+                    Carousel Format
+                  </label>
+                  <select
+                    value={carouselFormat}
+                    onChange={(e) => setCarouselFormat(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors"
+                  >
+                    <option value="4:5 (Standard Post)">4:5 (Standard Post)</option>
+                    <option value="9:16 (Reel / TikTok)">9:16 (Reels / TikTok Story)</option>
+                  </select>
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-[11px] text-slate-500 font-bold uppercase block">
                     Cover Tagline
@@ -1766,6 +1785,25 @@ const handleDownloadCarousel = async () => {
                 <ImageIcon className="w-3.5 h-3.5" /> Instagram Carousel
               </h3>
               <div className="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm space-y-4">
+                <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                  Instantly download a ready-to-post photo carousel formatted for Instagram or TikTok.
+                </p>
+                
+                {/* NEW DROPDOWN ADDED HERE */}
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-500 font-bold uppercase block">
+                    Carousel Format
+                  </label>
+                  <select
+                    value={carouselFormat}
+                    onChange={(e) => setCarouselFormat(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors"
+                  >
+                    <option value="4:5 (Standard Post)">4:5 (Standard Post)</option>
+                    <option value="9:16 (Reel / TikTok)">9:16 (Reels / TikTok Story)</option>
+                  </select>
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-[11px] text-slate-500 font-bold uppercase block">
                     Cover Tagline
