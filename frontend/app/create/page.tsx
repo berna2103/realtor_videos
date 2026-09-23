@@ -28,8 +28,8 @@ import {
   RefreshCw,
   LayoutDashboard,
   Image as ImageIcon,
-  Instagram, // Added for Social Handle
-  User       // Added for UI consistency
+  Instagram,
+  User 
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -39,15 +39,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const STRIPE_PRICE_ID_5_CREDITS =
   process.env.NEXT_PUBLIC_STRIPE_PRICE_ID || "price_XXXXXX";
 
-// Expanded Voice Options to include Spanish High-Quality Neural Voices
 const VOICE_OPTIONS = [
-  // English Voices
   { label: "Bella (Crisp & Professional)", value: "English-US-Bella" },
   { label: "Chloe (Warm & Inviting)", value: "English-US-Heart" },
   { label: "Michael (Upbeat & Friendly)", value: "English-US-Michael" },
   { label: "Marcus (Deep & Cinematic)", value: "English-US-Fenrir" },
-  
-  // Spanish Voices
   { label: "Elena (Español - Amable)", value: "Spanish-Dora" },
   { label: "Alejandro (Español - Profesional)", value: "Spanish-Alex" },
 ];
@@ -87,7 +83,6 @@ interface Scene {
   enable_vo: boolean;
 }
 
-// Added social_handle and headshot_data to the Meta interface
 interface Meta {
   address: string;
   price: string;
@@ -116,7 +111,14 @@ const RENDER_MESSAGES = [
   "Almost there! Please don't close this tab...",
 ];
 
-// --- STABLE SIDEBAR COMPONENT ---
+const FETCH_MESSAGES = [
+  "Parsing Zillow property data...",
+  "Downloading high-res image assets...",
+  "Writing Facebook & Instagram copy...",
+  "AI analyzing room types & transitions...",
+  "Finalizing storyboard...",
+];
+
 const SidebarSettings = ({
   primaryColor,
   setPrimaryColor,
@@ -173,7 +175,7 @@ const SidebarSettings = ({
             <Globe className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="www.luxuryhomes.com"
+              placeholder="www.barcias.com"
               value={meta.website}
               onChange={(e) => setMeta({ ...meta, website: e.target.value })}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 pl-10 text-sm text-slate-900 outline-none focus:border-blue-500 focus:bg-white transition-all shadow-sm"
@@ -197,7 +199,6 @@ const SidebarSettings = ({
           </div>
         </div>
 
-        {/* --- ADDED INSTAGRAM HANDLE --- */}
         <div className="space-y-2">
           <label className="text-[11px] text-slate-500 font-bold uppercase ml-1 block">
             Instagram Handle
@@ -227,7 +228,6 @@ const SidebarSettings = ({
           />
         </div>
 
-        {/* --- ADDED HEADSHOT UPLOAD --- */}
         <div className="space-y-3">
           <span className="text-[11px] text-slate-500 font-bold uppercase ml-1 block">
             Agent Headshot
@@ -301,7 +301,6 @@ const SidebarSettings = ({
           )}
         </div>
 
-        {/* ENHANCEMENT: Save Brand Kit */}
         <button
           onClick={saveBrandKit}
           className="w-full mt-2 py-3 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
@@ -406,9 +405,9 @@ const SidebarSettings = ({
             onChange={(e) => setFont(e.target.value)}
             className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-900 font-medium outline-none"
           >
+            <option value="Cinzel">Cinzel</option>
             <option value="Inter">Inter</option>
             <option value="Roboto">Roboto</option>
-            <option value="Cinzel">Cinzel</option>
             <option value="Playfair">Playfair Display</option>
           </select>
         </div>
@@ -450,7 +449,7 @@ const SidebarSettings = ({
 );
 
 const isValidZillowUrl = (link: string) => {
-  if (!link) return true; // Don't show error when empty
+  if (!link) return true;
   return link.includes("zillow.com") && /([0-9]+)_zpid/.test(link);
 };
 
@@ -483,7 +482,6 @@ export default function CinematicListingApp() {
   });
   const [scenes, setScenes] = useState<Scene[]>([]);
 
-  // ENHANCEMENT: Neighborhood Context & Multi-platform Social Drafts
   const [neighborhoodContext, setNeighborhoodContext] = useState("");
   const [socialDrafts, setSocialDrafts] = useState({
     facebook: "",
@@ -493,7 +491,7 @@ export default function CinematicListingApp() {
   const [activeTab, setActiveTab] = useState("instagram");
   const [renderProgress, setRenderProgress] = useState(0);
 
-  const [carouselFormat, setCarouselFormat] = useState("4:5 (Standard Post)"); // ADD THIS
+  const [carouselFormat, setCarouselFormat] = useState("4:5 (Standard Post)"); 
 
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
   const [showCaptions, setShowCaptions] = useState(true);
@@ -508,7 +506,10 @@ export default function CinematicListingApp() {
   const [isOwnListing, setIsOwnListing] = useState<boolean>(true);
   const [showTopUpModal, setShowTopUpModal] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  
   const [isLoading, setIsLoading] = useState(false);
+  const [fetchMsgIdx, setFetchMsgIdx] = useState(0);
+
   const [zillowUrl, setZillowUrl] = useState("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isRendering, setIsRendering] = useState(false);
@@ -525,14 +526,11 @@ export default function CinematicListingApp() {
   const [statusChoice, setStatusChoice] = useState("Just Listed");
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // Mobile UI States
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
-  // Carousel Entries
   const [customTagline, setCustomTagline] = useState(" ");
 
-  // --- ADDED: Auto-load Profile Data from Supabase when User logs in ---
   useEffect(() => {
     if (!user?.id) return;
 
@@ -541,7 +539,6 @@ export default function CinematicListingApp() {
         const res = await fetch(`${API_URL}/api/profile/${user.id}`);
         if (res.ok) {
           const data = await res.json();
-          // If the user has saved data, automatically populate the form!
           if (data && Object.keys(data).length > 0) {
             setMeta((prev) => ({
               ...prev,
@@ -565,8 +562,6 @@ export default function CinematicListingApp() {
     fetchSavedProfile();
   }, [user?.id]);
 
-
-  // Sync Voice and Language for Spanish
   useEffect(() => {
     if (language === "Spanish" && !voice.startsWith("Spanish-")) {
       setVoice("Spanish-Alex");
@@ -580,7 +575,6 @@ export default function CinematicListingApp() {
     const savedScenes = localStorage.getItem("draft_scenes");
     const savedBrand = localStorage.getItem("realtor_brand_kit");
 
-    // ENHANCEMENT: Pre-fill the Brand Kit
     if (savedBrand) {
       const parsed = JSON.parse(savedBrand);
       setMeta((prev) => ({
@@ -615,7 +609,7 @@ export default function CinematicListingApp() {
       logoData: logoData,
     };
     localStorage.setItem("realtor_brand_kit", JSON.stringify(brandData));
-    alert("✅ Brand preferences saved as default!");
+    toast.success("Brand preferences saved as default!");
   };
 
   const isCompliant =
@@ -632,7 +626,7 @@ export default function CinematicListingApp() {
           password: authPassword,
         });
         if (error) throw error;
-        alert("Check your email for a link!");
+        toast.success("Check your email for a link!");
         setIsSignUp(false);
       } else {
         const { error } = await supabase.auth.signInWithPassword({
@@ -643,7 +637,7 @@ export default function CinematicListingApp() {
         setShowAuthModal(false);
       }
     } catch (error: any) {
-      alert(error.message);
+      toast.error(error.message);
     } finally {
       setAuthLoading(false);
     }
@@ -663,15 +657,13 @@ export default function CinematicListingApp() {
       const data = await res.json();
       if (data.url) window.location.href = data.url;
     } catch (e) {
-      alert("Checkout failed");
+      toast.error("Checkout failed");
     }
   };
 
   const handleFetchData = async (e?: React.FormEvent) => {
-    // Prevent default if triggered by a form submission
     if (e) e.preventDefault();
 
-    // 1. Pre-validate URL before hitting the backend
     if (!isValidZillowUrl(zillowUrl)) {
       toast.error(
         "Invalid Zillow URL. Please ensure it includes the property ID (_zpid).",
@@ -680,11 +672,15 @@ export default function CinematicListingApp() {
     }
 
     setIsLoading(true);
+    setFetchMsgIdx(0);
+    const fetchInterval = setInterval(() => {
+      setFetchMsgIdx((prev) => (prev + 1) % FETCH_MESSAGES.length);
+    }, 2000);
+
     try {
       const response = await fetch(`${API_URL}/api/fetch-zillow`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Passes both the URL and the newly added neighborhood context
         body: JSON.stringify({ zillowUrl, language, neighborhood_context: neighborhoodContext }),
       });
 
@@ -700,7 +696,6 @@ export default function CinematicListingApp() {
       }
 
       setMeta({ ...meta, ...data.meta });
-      // Populate Social Drafts
       setSocialDrafts(
         data.socialDrafts || {
           facebook: data.fbDraft || "",
@@ -711,7 +706,6 @@ export default function CinematicListingApp() {
       setScenes(data.scenes || []);
 
       toast.success("Property data fetched successfully!");
-
       setStep(2);
     } catch (error: any) {
       console.error("Fetch error:", error);
@@ -719,6 +713,7 @@ export default function CinematicListingApp() {
         error.message || "Failed to fetch property data. Please try again.",
       );
     } finally {
+      clearInterval(fetchInterval);
       setIsLoading(false);
     }
   };
@@ -734,7 +729,6 @@ export default function CinematicListingApp() {
       return;
     }
 
-    // 1. TRIGGER THE IMMERSIVE UI
     setIsRendering(true);
     setRenderProgress(0);
     setRenderMsgIdx(0);
@@ -781,7 +775,6 @@ export default function CinematicListingApp() {
       const data = await res.json();
       refreshCredits();
 
-      // 2. POLL FOR PROGRESS
       const poll = setInterval(async () => {
         try {
           const sRes = await fetch(`${API_URL}/api/job-status/${data.job_id}`);
@@ -798,7 +791,6 @@ export default function CinematicListingApp() {
             setIsRendering(false);
             setRenderProgress(0);
             
-            // 3. SHOW THE "MASTERPIECE READY" SCREEN
             setStep(3);
 
             localStorage.removeItem("draft_meta");
@@ -879,7 +871,6 @@ export default function CinematicListingApp() {
 const handleDownloadCarousel = async () => {
       setIsDownloading(true);
       
-      // FIX: Include all required fields that the FastAPI RenderRequest model expects
       const payload = {
           meta: {
               ...meta,
@@ -913,12 +904,11 @@ const handleDownloadCarousel = async () => {
               throw new Error("Failed to generate carousel");
           }
 
-          // Handle the incoming ZIP file stream
           const blob = await response.blob();
           const url = window.URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
-          link.setAttribute('download', `carousel_${meta.address.replace(/[^a-z0-9]/gi, "_") || "instagram"}.zip`);
+          link.setAttribute('download', `carousel_${meta.address.toUpperCase().replace(/[^A-Z0-9]/g, "_") || "INSTAGRAM"}.zip`);
           document.body.appendChild(link);
           link.click();
           
@@ -1006,6 +996,17 @@ const handleDownloadCarousel = async () => {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-6">
+          {step > 1 && (
+            <button
+              onClick={handleStartOver}
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 bg-red-50 text-red-600 hover:bg-red-100 border border-red-100 rounded-full font-bold text-[10px] sm:text-sm transition-all shadow-sm shrink-0"
+              title="Clear Storyboard"
+            >
+              <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden min-[400px]:inline">Start Over</span>
+            </button>
+          )}
+
           {user && (
             <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-slate-50 border border-slate-200 rounded-full shrink-0">
               <Coins className="w-4 h-4 text-blue-600" />
@@ -1032,7 +1033,6 @@ const handleDownloadCarousel = async () => {
                 <LayoutDashboard className="w-5 h-5" />
               </Link>
 
-              {/* NEW SETTINGS LINK ADDED HERE */}
               <Link
                 href="/settings"
                 className="p-1.5 sm:p-2 text-slate-400 hover:text-blue-600 transition-colors"
@@ -1041,7 +1041,7 @@ const handleDownloadCarousel = async () => {
                 <User className="w-5 h-5" />
               </Link>
 
-              <span className="text-sm text-slate-500 hidden md:block font-medium border-l border-slate-200 pl-4">
+              <span className="text-sm text-slate-500 hidden xl:block font-medium border-l border-slate-200 pl-4">
                 {userEmail}
               </span>
 
@@ -1112,14 +1112,6 @@ const handleDownloadCarousel = async () => {
             setEnableMusic={setEnableMusic}
             saveBrandKit={saveBrandKit}
           />
-          {step > 1 && (
-            <button
-              onClick={handleStartOver}
-              className="mt-auto flex items-center justify-center gap-2 p-4 bg-red-50 border border-red-100 rounded-xl text-xs font-bold text-red-600 hover:bg-red-100 transition-all"
-            >
-              <RefreshCw className="w-3 h-3" /> Clear Storyboard
-            </button>
-          )}
         </aside>
 
         {/* MAIN CONTENT AREA */}
@@ -1204,7 +1196,10 @@ const handleDownloadCarousel = async () => {
                     className="bg-blue-600 text-white px-10 py-5 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200 active:scale-[0.98] flex items-center justify-center disabled:opacity-50 shrink-0"
                   >
                     {isLoading ? (
-                      <Loader2 className="animate-spin" />
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="animate-spin w-4 h-4" />
+                        <span className="text-sm">{FETCH_MESSAGES[fetchMsgIdx]}</span>
+                      </div>
                     ) : (
                       "Build My Tour"
                     )}
@@ -1446,12 +1441,6 @@ const handleDownloadCarousel = async () => {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => setStep(1)}
-                  className="text-slate-400 font-bold text-sm mt-4 hover:text-slate-900 transition-colors"
-                >
-                  Create Another Tour
-                </button>
               </div>
             </div>
           )}
@@ -1475,9 +1464,11 @@ const handleDownloadCarousel = async () => {
                   <input
                     type="text"
                     value={(meta as any)[f.key]}
-                    onChange={(e) =>
-                      setMeta({ ...meta, [f.key]: e.target.value })
-                    }
+                    onChange={(e) => {
+                      // Apply uppercase transformation for address as per user corrections
+                      const val = f.key === "address" ? e.target.value.toUpperCase() : e.target.value;
+                      setMeta({ ...meta, [f.key]: val })
+                    }}
                     className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors"
                   />
                 </div>
@@ -1587,7 +1578,7 @@ const handleDownloadCarousel = async () => {
                 <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-500">
                   <input
                     type="text"
-                    placeholder="Listing Agent"
+                    placeholder="e.g., Bernardo Jimenez"
                     value={meta.agent}
                     onChange={(e) =>
                       setMeta({ ...meta, agent: e.target.value })
@@ -1596,7 +1587,7 @@ const handleDownloadCarousel = async () => {
                   />
                   <input
                     type="text"
-                    placeholder="Brokerage Name"
+                    placeholder="e.g., Barcias Realty"
                     value={meta.brokerage}
                     onChange={(e) =>
                       setMeta({ ...meta, brokerage: e.target.value })
@@ -1629,8 +1620,6 @@ const handleDownloadCarousel = async () => {
           </section>
         </aside>
       </div>
-
-      {/* --- OUTSIDE THE LAYOUT TRAP: MOBILE UI ELEMENTS --- */}
 
       {/* MOBILE LEFT DRAWER (SETTINGS) */}
       <div
@@ -1698,14 +1687,6 @@ const handleDownloadCarousel = async () => {
             setEnableMusic={setEnableMusic}
             saveBrandKit={saveBrandKit}
           />
-          {step > 1 && (
-            <button
-              onClick={handleStartOver}
-              className="mt-auto flex items-center justify-center gap-2 p-4 bg-red-50 border border-red-100 rounded-xl text-xs font-bold text-red-600 hover:bg-red-100 transition-all"
-            >
-              <RefreshCw className="w-3 h-3" /> Clear Storyboard
-            </button>
-          )}
         </aside>
       </div>
 
@@ -1747,9 +1728,10 @@ const handleDownloadCarousel = async () => {
                   <input
                     type="text"
                     value={(meta as any)[f.key]}
-                    onChange={(e) =>
-                      setMeta({ ...meta, [f.key]: e.target.value })
-                    }
+                    onChange={(e) => {
+                      const val = f.key === "address" ? e.target.value.toUpperCase() : e.target.value;
+                      setMeta({ ...meta, [f.key]: val })
+                    }}
                     className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors"
                   />
                 </div>
@@ -1859,7 +1841,7 @@ const handleDownloadCarousel = async () => {
                 <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-500">
                   <input
                     type="text"
-                    placeholder="Listing Agent"
+                    placeholder="e.g., Bernardo Jimenez"
                     value={meta.agent}
                     onChange={(e) =>
                       setMeta({ ...meta, agent: e.target.value })
@@ -1868,7 +1850,7 @@ const handleDownloadCarousel = async () => {
                   />
                   <input
                     type="text"
-                    placeholder="Brokerage Name"
+                    placeholder="e.g., Barcias Realty"
                     value={meta.brokerage}
                     onChange={(e) =>
                       setMeta({ ...meta, brokerage: e.target.value })

@@ -2,9 +2,10 @@ import os
 import uuid
 import asyncio
 import io
-import os
 import zipfile
+import shutil
 from typing import List, Optional
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -50,7 +51,7 @@ class FetchRequest(BaseModel):
     user_id: Optional[str] = None
     neighborhood_context: Optional[str] = ""
 
-# ---> THE FIX: Added custom_tagline, social_handle, and headshot_data here <---
+# --- UPDATED: Added listing_agent, listing_brokerage, views, saves ---
 class MetaDef(BaseModel):
     address: str 
     price: str 
@@ -68,6 +69,10 @@ class MetaDef(BaseModel):
     custom_tagline: Optional[str] = None
     social_handle: Optional[str] = None
     headshot_data: Optional[str] = None
+    listing_agent: Optional[str] = None
+    listing_brokerage: Optional[str] = None
+    views: Optional[int] = 0
+    saves: Optional[int] = 0
 
 class SceneDef(BaseModel):
     id: str
@@ -110,11 +115,19 @@ def fetch_real_places(lat: float, lng: float, place_type: str) -> str:
         names = [place.get("displayName", {}).get("text") for place in places[:3] if place.get("displayName", {}).get("text")]
         return ", ".join(names)
     except: return ""
-    
+
+def update_job_status(job_id: str, updates: dict):
+    if job_id in jobs:
+        jobs[job_id].update(updates)
+    if supabase:
+        try:
+            supabase.table("video_jobs").update(updates).eq("job_id", job_id).execute()
+        except:
+            pass
+
 def background_render_task(job_id: str, req: RenderRequest):
     try:
-        jobs[job_id]["status"] = "rendering"
-        jobs[job_id]["progress"] = 2
+        update_job_status(job_id, {"status": "rendering", "progress": 2})
         output_filename = f"listing_{job_id}.mp4"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
 
@@ -123,7 +136,7 @@ def background_render_task(job_id: str, req: RenderRequest):
         success = loop.run_until_complete(render_cinematic_video(job_id, req, output_path, BASE_DIR))
 
         if success:
-            jobs[job_id]["progress"] = 99 
+            update_job_status(job_id, {"progress": 99})
             final_video_url = f"{get_base_url()}/outputs/{output_filename}"
             
             if supabase:
@@ -138,21 +151,23 @@ def background_render_task(job_id: str, req: RenderRequest):
                     except: pass
                 except: pass
 
-            jobs[job_id].update({"status": "completed", "progress": 100, "video_url": final_video_url})
+            update_job_status(job_id, {"status": "completed", "progress": 100, "video_url": final_video_url})
             
     except Exception as e:
         traceback.print_exc()  
-        jobs[job_id].update({"status": "failed", "error": str(e), "progress": 0})
+        update_job_status(job_id, {"status": "failed", "error": str(e), "progress": 0})
             
 @app.post("/api/fetch-zillow")
 async def fetch_zillow(req: FetchRequest):
     if supabase and req.user_id:
         user_data = supabase.table("user_credits").select("balance").eq("user_id", req.user_id).single().execute()
-        if user_data.data and user_data.data.get("credits", 0) < 1: 
+        balance = user_data.data.get("balance", 0) if user_data.data else 0
+        if user_data.data and user_data.data.get("credits", balance) < 1: 
             raise HTTPException(status_code=402, detail="Insufficient credits.")
     
     try:
-        meta_data, downloaded_images = fetch_zillow_data(req.zillowUrl)
+        job_id = str(uuid.uuid4())
+        meta_data, downloaded_images = fetch_zillow_data(req.zillowUrl, job_id)
         downloaded_images = list(dict.fromkeys(downloaded_images))
 
         if req.neighborhood_context and req.neighborhood_context.strip():
@@ -181,23 +196,26 @@ async def fetch_zillow(req: FetchRequest):
                     meta_data['neighborhood_context'] = response.text.strip()
                 except: meta_data['neighborhood_context'] = ""
 
-        # GENERATE SOCIAL MEDIA CAPTIONS
-        facebook_draft = generate_fb_post_content(meta_data, req.language)
-        instagram_draft = generate_ig_caption(meta_data, req.language)
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            fb_task = loop.run_in_executor(pool, generate_fb_post_content, meta_data, req.language)
+            ig_task = loop.run_in_executor(pool, generate_ig_caption, meta_data, req.language)
+            scenes_task = loop.run_in_executor(pool, analyze_scenes_batch, downloaded_images, req.language, meta_data)
+            
+            facebook_draft, instagram_draft, batch_analysis = await asyncio.gather(fb_task, ig_task, scenes_task)
+
         social_drafts = {
             "facebook": facebook_draft,
             "instagram": instagram_draft,
             "tiktok": f"Wait until you see the inside of this house! 🤯🏡 {meta_data.get('address', 'New Listing')} #realestate #hometour #property"
         }
         
-        batch_analysis = analyze_scenes_batch(downloaded_images, req.language, meta_data)
-
         scenes = []
         for i, img_path in enumerate(downloaded_images):
             analysis = next((item for item in batch_analysis if item.get("image_index") == i), {})
             original_filename = os.path.basename(img_path)
             unique_filename = f"{uuid.uuid4().hex[:8]}_{original_filename}"
-            public_url = f"{get_base_url()}/raw_photos/{original_filename}"
+            public_url = f"{get_base_url()}/raw_photos/{job_id}/{original_filename}"
             
             if supabase:
                 try:
@@ -216,7 +234,7 @@ async def fetch_zillow(req: FetchRequest):
                 "enable_vo": True
             })
 
-        return {"meta": meta_data, "socialDrafts": social_drafts, "scenes": scenes}
+        return {"meta": meta_data, "socialDrafts": social_drafts, "scenes": scenes, "job_id": job_id}
     except Exception as e: 
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -225,17 +243,30 @@ async def start_render(req: RenderRequest, background_tasks: BackgroundTasks):
     if supabase and req.user_id:
         response = supabase.rpc("deduct_credit", {"target_user_id": req.user_id}).execute()
         if not response.data: raise HTTPException(status_code=402, detail="Insufficient credits.")
+    
     job_id = str(uuid.uuid4())
-    jobs[job_id] = {"status": "queued", "progress": 0, "video_url": None, "error": None}
+    jobs[job_id] = {"status": "queued", "progress": 0, "video_url": None, "error": None, "job_id": job_id}
+    
+    if supabase:
+        try:
+            supabase.table("video_jobs").insert({"job_id": job_id, "status": "queued", "progress": 0}).execute()
+        except: pass
+
     background_tasks.add_task(background_render_task, job_id, req)
     return {"job_id": job_id, "status": "queued"}
 
 @app.get("/api/job-status/{job_id}")
 async def get_job_status(job_id: str):
+    if supabase:
+        try:
+            res = supabase.table("video_jobs").select("*").eq("job_id", job_id).execute()
+            if res.data:
+                return res.data[0]
+        except: pass
+        
     job = jobs.get(job_id)
     if not job: raise HTTPException(status_code=404, detail="Job not found")
     return job
-
 
 @app.post("/api/generate-carousel")
 async def generate_carousel(req: RenderRequest):
@@ -259,8 +290,6 @@ async def generate_carousel(req: RenderRequest):
             social_handle = req.meta.social_handle if req.meta else ""
             price = req.meta.price if req.meta else ""
             
-            # --- LOCAL ASSETS CHECK (HEADSHOT & LOGO) ---
-            # 1. Headshot
             local_headshot = None
             for ext in ["headshot.jpg", "headshot.jpeg", "headshot.png", "headshot.webp"]:
                 candidate = os.path.join(BASE_DIR, "assets", ext)
@@ -269,7 +298,6 @@ async def generate_carousel(req: RenderRequest):
                     break
             headshot_path = local_headshot
 
-            # 2. Brokerage / Brand Logo
             local_logo = None
             for ext in ["logo.png", "logo.jpg", "logo.jpeg", "logo.webp"]:
                 candidate = os.path.join(BASE_DIR, "assets", ext)
@@ -280,30 +308,6 @@ async def generate_carousel(req: RenderRequest):
 
             tw, th = (1080, 1920) if "9:16" in (req.carousel_format or "") else (1080, 1350)
 
-            # 1. Generate Cover
-            if req.scenes and len(req.scenes) > 0:
-                cover_img = create_carousel_cover(req.scenes[0].image_path, city_state, specs, tagline, price, BASE_DIR, target_w=tw, target_h=th)
-                img_byte_arr = io.BytesIO()
-                cover_img.save(img_byte_arr, format='JPEG', quality=95)
-                zip_file.writestr("01_cover.jpg", img_byte_arr.getvalue())
-            
-            # 2. Generate Interiors 
-            if req.scenes and len(req.scenes) > 1:
-                for i, scene in enumerate(req.scenes[1:19]): 
-                    slide_img = resize_and_crop(scene.image_path, target_w=tw, target_h=th).convert("RGB")
-                    img_byte_arr = io.BytesIO()
-                    slide_img.save(img_byte_arr, format='JPEG', quality=90)
-                    zip_file.writestr(f"{i+2:02d}_interior.jpg", img_byte_arr.getvalue())
-                
-            # 3. Generate End Card
-            end_card = create_carousel_end_card(agent, brokerage, phone, social_handle, BASE_DIR, headshot_path, logo_path, target_w=tw, target_h=th)
-            img_byte_arr = io.BytesIO()
-            end_card.save(img_byte_arr, format='JPEG', quality=95)
-            zip_file.writestr("99_contact.jpg", img_byte_arr.getvalue())
-
-            tw, th = (1080, 1920) if "9:16" in (req.carousel_format or "") else (1080, 1350)
-            
-            # Frontend uploads override local default assets
             if req.logo_data and ',' in req.logo_data:
                 logo_data = base64.b64decode(req.logo_data.split(',', 1)[1])
                 logo_path = os.path.join(BASE_DIR, f"temp_c_logo_{job_id}.png")
@@ -314,23 +318,39 @@ async def generate_carousel(req: RenderRequest):
                 headshot_path = os.path.join(BASE_DIR, f"temp_hs_{job_id}.png")
                 Image.open(io.BytesIO(hs_data)).save(headshot_path)
             
-            # 1. Generate Cover
+            # 1. Generate Cover (Now passes individual fields for the pills)
             if req.scenes and len(req.scenes) > 0:
-                cover_img = create_carousel_cover(req.scenes[0].image_path, city_state, specs, tagline, price, BASE_DIR)
+                cover_img = create_carousel_cover(
+                    req.scenes[0].image_path, 
+                    city_state, 
+                    req.meta.beds if req.meta else "", 
+                    req.meta.baths if req.meta else "", 
+                    req.meta.sqft if req.meta else "", 
+                    tagline, 
+                    price, 
+                    BASE_DIR, 
+                    target_w=tw, 
+                    target_h=th
+                )
                 img_byte_arr = io.BytesIO()
                 cover_img.save(img_byte_arr, format='JPEG', quality=95)
                 zip_file.writestr("01_cover.jpg", img_byte_arr.getvalue())
             
-            # 2. Generate Interiors (up to 18 interior slides)
             if req.scenes and len(req.scenes) > 1:
                 for i, scene in enumerate(req.scenes[1:19]): 
-                    slide_img = resize_and_crop(scene.image_path).convert("RGB")
+                    slide_img = resize_and_crop(scene.image_path, target_w=tw, target_h=th).convert("RGB")
                     img_byte_arr = io.BytesIO()
                     slide_img.save(img_byte_arr, format='JPEG', quality=90)
                     zip_file.writestr(f"{i+2:02d}_interior.jpg", img_byte_arr.getvalue())
                 
-            # 3. Generate End Card with both headshot & logo
-            end_card = create_carousel_end_card(agent, brokerage, phone, social_handle, BASE_DIR, headshot_path, logo_path)
+            # --- UPDATED: Pass compliance variables into end card ---
+            end_card = create_carousel_end_card(
+                agent, brokerage, phone, social_handle, BASE_DIR, headshot_path, logo_path, 
+                target_w=tw, target_h=th, theme_color=req.primary_color,
+                is_own_listing=req.is_own_listing,
+                listing_agent=req.meta.listing_agent if req.meta else None,
+                listing_brokerage=req.meta.listing_brokerage if req.meta else None
+            )
             img_byte_arr = io.BytesIO()
             end_card.save(img_byte_arr, format='JPEG', quality=95)
             zip_file.writestr("99_contact.jpg", img_byte_arr.getvalue())
@@ -338,7 +358,6 @@ async def generate_carousel(req: RenderRequest):
         zip_buffer.seek(0)
         safe_addr = "".join(c for c in address if c.isalnum() or c in " ,_-").replace(" ", "_")
         
-        # Cleanup temporary files (safely preserves permanent files in backend/assets/)
         try:
             if logo_path and "temp_c_logo_" in logo_path and os.path.exists(logo_path): 
                 os.remove(logo_path)
@@ -355,8 +374,6 @@ async def generate_carousel(req: RenderRequest):
         print(f"Carousel Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- PROFILE & SETTINGS ENDPOINTS ---
-
 class ProfileUpdate(BaseModel):
     user_id: str
     agent_name: Optional[str] = None
@@ -364,8 +381,8 @@ class ProfileUpdate(BaseModel):
     phone: Optional[str] = None
     website: Optional[str] = None
     social_handle: Optional[str] = None
-    headshot_data: Optional[str] = None # Base64 from frontend
-    logo_data: Optional[str] = None     # Base64 from frontend
+    headshot_data: Optional[str] = None 
+    logo_data: Optional[str] = None     
 
 @app.get("/api/profile/{user_id}")
 async def get_profile(user_id: str):
@@ -391,7 +408,6 @@ async def update_profile(req: ProfileUpdate):
         "social_handle": req.social_handle
     }
     
-    # Helper to upload base64 images directly to Supabase Storage
     def upload_b64(b64_str, filename):
         header, encoded = b64_str.split(",", 1)
         file_data = base64.b64decode(encoded)
@@ -405,13 +421,11 @@ async def update_profile(req: ProfileUpdate):
         )
         return supabase.storage.from_("brand_assets").get_public_url(path)
 
-    # If the user uploaded a new image, save it to the cloud
     if req.headshot_data and req.headshot_data.startswith("data:image"):
         update_data["headshot_url"] = upload_b64(req.headshot_data, "headshot.jpg")
         
     if req.logo_data and req.logo_data.startswith("data:image"):
         update_data["logo_url"] = upload_b64(req.logo_data, "logo.png")
         
-    # Upsert the profile into the database
     res = supabase.table("user_profiles").upsert(update_data).execute()
     return {"success": True, "profile": res.data[0] if res.data else {}}
