@@ -303,14 +303,12 @@ def create_carousel_cover(img_path, location, beds, baths, sqft, tagline, price,
     scrim = Image.new('RGBA', (target_w, target_h), (0,0,0,0))
     scrim_draw = ImageDraw.Draw(scrim)
     
-    # --- Top Gradient for Downpayment Visibility ---
     end_top_y = int(target_h * 0.25)
     for y in range(end_top_y):
         progress = 1.0 - (y / end_top_y)
         alpha = int(200 * (progress ** 1.5))
         scrim_draw.line([(0, y), (target_w, y)], fill=(0, 0, 0, alpha))
     
-    # --- Bottom Gradient for Location/Specs Visibility ---
     start_y = int(target_h * 0.55) if target_h > 1500 else int(target_h * 0.66)
     for y in range(start_y, target_h):
         progress = (y - start_y) / (target_h - start_y)
@@ -324,12 +322,13 @@ def create_carousel_cover(img_path, location, beds, baths, sqft, tagline, price,
     def draw_centered(text, font, y, fill=(255, 255, 255, 255), stroke=1):
         bbox = draw.textbbox((0, 0), text, font=font)
         x = (target_w - (bbox[2] - bbox[0])) / 2
+        draw.text((x+2, y+2), text, font=font, fill=(0, 0, 0, 120))
         draw.text((x, y), text, font=font, fill=fill, stroke_width=stroke, stroke_fill=fill)
 
-    bottom_padding = 380 if target_h > 1500 else 120
+    bottom_padding = 380 if target_h > 1500 else 140
     y_specs = target_h - bottom_padding
-    y_location = y_specs - 150
-    y_tagline = y_location - 60
+    y_location = y_specs - 210 
+    y_tagline = y_location - 65
     
     # --- 1. Auto-Scale Price & Downpayment ---
     if price:
@@ -349,7 +348,7 @@ def create_carousel_cover(img_path, location, beds, baths, sqft, tagline, price,
             font_price = get_font("Montserrat-Bold", p_font_size, base_dir)
             bbox_p = draw.textbbox((0, 0), p_str, font=font_price)
             
-        draw_centered(p_str, font_price, 80 if target_h < 1500 else 140, stroke=2)
+        draw_centered(p_str, font_price, 80 if target_h < 1500 else 140, stroke=1)
 
         disc_size = 18
         font_disc = get_font("Montserrat", disc_size, base_dir)
@@ -387,74 +386,98 @@ def create_carousel_cover(img_path, location, beds, baths, sqft, tagline, price,
     start_x = (target_w - total_w) / 2
     
     pin_y = y_location + int(loc_h * 0.90) 
+    
     draw_vector_map_pin(draw, start_x + (pin_base_size//2), pin_y, scale=pin_scale)
     
     text_x = start_x + pin_base_size + 25
+    draw.text((text_x+2, y_location+2), loc_text, font=font_location, fill=(0, 0, 0, 120))
     draw.text((text_x, y_location), loc_text, font=font_location, fill=(255, 255, 255, 255), stroke_width=1, stroke_fill=(255, 255, 255, 255))
     
-    # --- 3. Property Details Pills (Beds, Baths, Sqft) ---
-    f_pill = get_font("Montserrat-Bold", 30, base_dir)
-    color_light_gray = (210, 210, 210, 255)
-    color_pill_fill = (25, 25, 25, 140)
-    color_pill_outline = (255, 255, 255, 40)
+    # --- 3. MODERN EDITORIAL SPECS (Bold Numbers, Split Labels) ---
+    f_num = get_font("Montserrat-Bold", 42, base_dir) # Larger, bold font for numbers
+    f_lbl = get_font("Montserrat", 30, base_dir)      # Lighter, smaller font for labels
+    color_white = (255, 255, 255, 255)
     
     details = []
-    if beds: details.append(('bed', str(beds) + " beds"))
-    if baths: details.append(('bath', str(baths) + " baths"))
-    if sqft: details.append(('sqft', str(sqft) + " Sqft."))
+    if beds: details.append(('bed', str(beds), "BEDS"))
+    if baths: details.append(('bath', str(baths), "BATHS"))
+    if sqft: details.append(('sqft', str(sqft), "SQFT"))
     
     if details:
-        pill_h = 75
-        icon_draw_scale = 35
+        icon_draw_scale = 45
         gap_icon_text = 15
-        gap_items = 40
-        ext_padding = 50
+        gap_items = 60 
         
         blocks_data = []
         total_content_width = 0
-        for icon_type, txt_val in details:
-            bbox = draw.textbbox((0, 0), txt_val, font=f_pill)
-            txt_w = bbox[2] - bbox[0]
-            block_w = icon_draw_scale + gap_icon_text + txt_w
-            blocks_data.append((icon_type, txt_val, block_w))
+        for icon_type, num_val, lbl_val in details:
+            num_bbox = draw.textbbox((0, 0), num_val, font=f_num)
+            lbl_bbox = draw.textbbox((0, 0), " " + lbl_val, font=f_lbl)
+            num_w = num_bbox[2] - num_bbox[0]
+            lbl_w = lbl_bbox[2] - lbl_bbox[0]
+            
+            block_w = icon_draw_scale + gap_icon_text + num_w + lbl_w
+            blocks_data.append((icon_type, num_val, lbl_val, block_w))
             total_content_width += block_w
             
-        pill_w = total_content_width + (len(details) - 1) * gap_items + (ext_padding * 2)
+        total_width = total_content_width + (len(details) - 1) * gap_items
         
-        # Scale down if pills are too wide for the screen
-        if pill_w > (target_w * 0.95):
-            scale_down = (target_w * 0.95) / pill_w
-            pill_h = int(pill_h * scale_down)
+        if total_width > (target_w * 0.90):
+            scale_down = (target_w * 0.90) / total_width
             icon_draw_scale = int(icon_draw_scale * scale_down)
-            f_pill = get_font("Montserrat-Bold", int(30 * scale_down), base_dir)
-            pill_w = int(pill_w * scale_down)
+            f_num = get_font("Montserrat-Bold", int(42 * scale_down), base_dir)
+            f_lbl = get_font("Montserrat", int(30 * scale_down), base_dir)
             gap_icon_text = int(gap_icon_text * scale_down)
             gap_items = int(gap_items * scale_down)
-            ext_padding = int(ext_padding * scale_down)
-            # Recalculate block sizes
+            
             blocks_data = []
-            for icon_type, txt_val in details:
-                bbox = draw.textbbox((0, 0), txt_val, font=f_pill)
-                txt_w = bbox[2] - bbox[0]
-                block_w = icon_draw_scale + gap_icon_text + txt_w
-                blocks_data.append((icon_type, txt_val, block_w))
+            total_content_width = 0
+            for icon_type, num_val, lbl_val in details:
+                num_w = draw.textbbox((0, 0), num_val, font=f_num)[2] - draw.textbbox((0, 0), num_val, font=f_num)[0]
+                lbl_w = draw.textbbox((0, 0), " " + lbl_val, font=f_lbl)[2] - draw.textbbox((0, 0), " " + lbl_val, font=f_lbl)[0]
+                block_w = icon_draw_scale + gap_icon_text + num_w + lbl_w
+                blocks_data.append((icon_type, num_val, lbl_val, block_w))
+                total_content_width += block_w
+            total_width = total_content_width + (len(details) - 1) * gap_items
         
-        px = (target_w - pill_w) // 2
+        curr_x = (target_w - total_width) // 2
+        py = y_specs
+        icon_center_y = py + (icon_draw_scale // 2)
         
-        # Position slightly lower than the old specs line to give it breathing room
-        py = y_specs - 15
-        
-        draw.rounded_rectangle([px, py, px + pill_w, py + pill_h], radius=pill_h // 2, fill=color_pill_fill, outline=color_pill_outline, width=2)
-        curr_x = px + ext_padding
-        icon_center_y = py + (pill_h // 2)
-        
-        for icon_type, txt_val, block_w in blocks_data:
+        for i, (icon_type, num_val, lbl_val, block_w) in enumerate(blocks_data):
             paths = BED_PATHS if icon_type == 'bed' else BATH_PATHS if icon_type == 'bath' else SQFT_PATHS
-            draw_unit_icon(draw, paths, curr_x + (icon_draw_scale // 2), icon_center_y, icon_draw_scale, color_light_gray)
+            
+            # Draw Icon
+            draw_unit_icon(draw, paths, curr_x + (icon_draw_scale // 2) + 2, icon_center_y + 2, icon_draw_scale, (0, 0, 0, 120))
+            draw_unit_icon(draw, paths, curr_x + (icon_draw_scale // 2), icon_center_y, icon_draw_scale, color_white)
+            
             curr_x += icon_draw_scale + gap_icon_text
-            txt_bbox = draw.textbbox((0, 0), txt_val, font=f_pill)
-            draw.text((curr_x, py + (pill_h - (txt_bbox[3] - txt_bbox[1])) // 2 - 5), txt_val, font=f_pill, fill=color_light_gray)
-            curr_x += (block_w - icon_draw_scale - gap_icon_text) + gap_items
+            
+            # Draw Number (Extra Bold using stroke_width=1)
+            num_bbox = draw.textbbox((0, 0), num_val, font=f_num)
+            num_y = icon_center_y - ((num_bbox[3] - num_bbox[1]) // 2) - 4
+            draw.text((curr_x + 2, num_y + 2), num_val, font=f_num, fill=(0, 0, 0, 120))
+            draw.text((curr_x, num_y), num_val, font=f_num, fill=color_white, stroke_width=1, stroke_fill=color_white)
+            
+            curr_x += (num_bbox[2] - num_bbox[0])
+            
+            # Draw Label (Lighter)
+            lbl_str = " " + lbl_val
+            lbl_bbox = draw.textbbox((0, 0), lbl_str, font=f_lbl)
+            lbl_y = icon_center_y - ((lbl_bbox[3] - lbl_bbox[1]) // 2) - 3
+            draw.text((curr_x + 2, lbl_y + 2), lbl_str, font=f_lbl, fill=(0, 0, 0, 120))
+            draw.text((curr_x, lbl_y), lbl_str, font=f_lbl, fill=color_white)
+            
+            curr_x += (lbl_bbox[2] - lbl_bbox[0])
+            
+            # Draw Dividers
+            if i < len(blocks_data) - 1:
+                div_x = curr_x + (gap_items // 2)
+                div_y_start = icon_center_y - (icon_draw_scale // 2)
+                div_y_end = icon_center_y + (icon_draw_scale // 2)
+                draw.line([(div_x + 1, div_y_start + 2), (div_x + 1, div_y_end + 2)], fill=(0, 0, 0, 80), width=2)
+                draw.line([(div_x, div_y_start), (div_x, div_y_end)], fill=(255, 255, 255, 180), width=2)
+                curr_x += gap_items
     
     # --- 4. Auto-Scale Tagline ---
     tagline_text = tagline.upper()
@@ -552,113 +575,228 @@ def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_d
 
 # --- VIDEO GENERATORS ---
 
+
+
 def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None, hide_exact_addr=False, hook_text=None):
     if not show_details: return []
-    color_white, color_light_gray = (255, 255, 255, 255), (210, 210, 210, 255)
-    color_pill_fill, color_pill_outline = (25, 25, 25, 140), (255, 255, 255, 40)
+    color_white = (255, 255, 255, 255)
 
     overlay_img = Image.new('RGBA', (tw, th), (0, 0, 0, 0))
-    scrim = create_gradient_scrim(tw, th)
-    overlay_img.paste(scrim, (0, 0), mask=scrim)
-    
-    if logo_path and os.path.exists(logo_path):
-        try:
-            logo_img = Image.open(logo_path).convert("RGBA")
-            logo_img.thumbnail((int(tw * 0.4), int(th * 0.12)), Image.Resampling.LANCZOS)
-            overlay_img.paste(logo_img, ((tw - logo_img.width) // 2, int(th * 0.05)), logo_img) 
-        except Exception as e:
-            pass
-
     draw = ImageDraw.Draw(overlay_img)
     
-    # --- 1. THE VISUAL HOOK (Auto-Scaling & Centered) ---
-    display_hook = hook_text if hook_text else status
-    if display_hook:
-        # Start with a slightly smaller baseline font for elegance
-        hook_font_size = int(th * 0.055) 
-        f_hook = get_font("Playfair-Bold", hook_font_size, base_dir)
-        
-        # Wrap text at ~20 characters so it stacks nicely
-        wrapped_hook = textwrap.wrap(display_hook.strip(), width=20)
-        
-        # Auto-scale font down if the longest line exceeds 85% of screen width
-        max_w = 0
-        for line in wrapped_hook:
-            bbox = draw.textbbox((0, 0), line, font=f_hook)
-            if (bbox[2] - bbox[0]) > max_w: max_w = bbox[2] - bbox[0]
-            
-        while max_w > (tw * 0.85):
-            hook_font_size -= 2
-            f_hook = get_font("Playfair-Bold", hook_font_size, base_dir)
-            max_w = 0
-            for line in wrapped_hook:
-                bbox = draw.textbbox((0, 0), line, font=f_hook)
-                if (bbox[2] - bbox[0]) > max_w: max_w = bbox[2] - bbox[0]
-
-        # Center the block of text vertically around the 35% mark
-        total_h = len(wrapped_hook) * (hook_font_size * 1.2)
-        current_y = int(th * 0.35) - int(total_h / 2)
-
-        for line in wrapped_hook:
-            bbox = draw.textbbox((0, 0), line, font=f_hook)
-            draw_text_with_shadow(draw, ((tw - (bbox[2] - bbox[0])) // 2, current_y), line, f_hook, color_white)
-            current_y += (bbox[3] - bbox[1]) + 15
-
-    # --- 2. PILLS (Beds/Baths/Sqft) ---
-    # Shifted up to center nicely since price is removed
-    y_pill = int(th * 0.52)
-    f_pill = get_font(font_choice, int(th * 0.022), base_dir)
-    if show_details:
-        details = []
-        if beds: details.append(('bed', str(beds) + " beds"))
-        if baths: details.append(('bath', str(baths) + " baths"))
-        if sqft: details.append(('sqft', str(sqft) + " Sqft."))
-        if details:
-            pill_h, icon_draw_scale = int(th * 0.06), int(th * 0.06 * 0.4)
-            gap_icon_text, gap_items, ext_padding = int(tw * 0.015), int(tw * 0.04), int(tw * 0.06)
-            blocks_data, total_content_width = [], 0
-            for icon_type, txt_val in details:
-                txt_w = draw.textbbox((0, 0), txt_val, font=f_pill)[2]
-                block_w = icon_draw_scale + gap_icon_text + txt_w
-                blocks_data.append((icon_type, txt_val, block_w))
-                total_content_width += block_w
-            pill_w = total_content_width + (len(details) - 1) * gap_items + (ext_padding * 2)
-            
-            px, py = (tw - pill_w) // 2, y_pill
-            draw.rounded_rectangle([px, py, px + pill_w, py + pill_h], radius=pill_h // 2, fill=color_pill_fill, outline=color_pill_outline, width=2)
-            curr_x, icon_center_y = px + ext_padding, py + (pill_h // 2)
-            for icon_type, txt_val, block_w in blocks_data:
-                paths = BED_PATHS if icon_type == 'bed' else BATH_PATHS if icon_type == 'bath' else SQFT_PATHS
-                draw_unit_icon(draw, paths, curr_x + (icon_draw_scale // 2), icon_center_y, icon_draw_scale, color_light_gray)
-                curr_x += icon_draw_scale + gap_icon_text
-                txt_bbox = draw.textbbox((0, 0), txt_val, font=f_pill)
-                draw.text((curr_x, py + (pill_h - (txt_bbox[3] - txt_bbox[1])) // 2 - int(th * 0.005)), txt_val, font=f_pill, fill=color_light_gray)
-                curr_x += (block_w - icon_draw_scale - gap_icon_text) + gap_items
-
-    # --- 3. ADDRESS ---
-    y_addr = int(th * 0.62)
-    display_addr = format_address(addr, hide_exact_addr)
-    if display_addr:
-        addr_size = int(th * 0.024)
-        f_addr = get_font(font_choice, addr_size, base_dir)
-        bbox = draw.textbbox((0, 0), display_addr, font=f_addr)
-        while (bbox[2] - bbox[0]) > (tw * 0.9):
-            addr_size -= 2
-            f_addr = get_font(font_choice, addr_size, base_dir)
-            bbox = draw.textbbox((0, 0), display_addr, font=f_addr)
-        draw_text_with_shadow(draw, ((tw - (bbox[2] - bbox[0])) // 2, y_addr), display_addr, f_addr, color_light_gray)
-
-    # --- 4. IL COMPLIANCE FOOTER ---
-    # Keeps the video strictly compliant without overcrowding the frame
-    footer_size = int(th * 0.018)
-    f_footer = get_font("Montserrat", footer_size, base_dir)
+    # Use min(tw, th) so fonts don't blow up on landscape videos
+    base_scale = min(tw, th)
     
+    # --- 1. Top & Bottom Gradients (Darkened for shadowless text visibility) ---
+    bottom_scrim = Image.new('RGBA', (tw, th), (0,0,0,0))
+    bottom_draw = ImageDraw.Draw(bottom_scrim)
+    # Pushed scrim higher to cover the stacked elements
+    scrim_start = int(th * 0.35) 
+    for y in range(scrim_start, th):
+        progress = (y - scrim_start) / (th - scrim_start)
+        alpha = int(240 * (progress ** 1.5)) 
+        bottom_draw.line([(0, y), (tw, y)], fill=(0, 0, 0, alpha))
+    overlay_img.paste(bottom_scrim, (0, 0), mask=bottom_scrim)
+    
+    top_scrim = Image.new('RGBA', (tw, th), (0,0,0,0))
+    top_draw = ImageDraw.Draw(top_scrim)
+    end_top_y = int(th * 0.30)
+    for y in range(end_top_y):
+        progress = 1.0 - (y / end_top_y)
+        alpha = int(220 * (progress ** 1.5))
+        top_draw.line([(0, y), (tw, y)], fill=(0, 0, 0, alpha))
+    overlay_img.paste(top_scrim, (0,0), mask=top_scrim)
+
+    try:
+        city_state = addr.split(',')[-2].strip() + ", " + addr.split(',')[-1].strip().split()[0] if ',' in addr else addr
+    except:
+        city_state = addr
+
+    # --- 2. DOWNPAYMENT (TOP) ---
+    y_dp = int(th * 0.08)
+    p_font_size = int(base_scale * 0.08)
+    
+    if price:
+        try:
+            raw_price = float(str(price).replace('$', '').replace(',', ''))
+            three_percent = raw_price * 0.03
+            downpayment = math.ceil(three_percent / 100.0) * 100
+            p_str = f"${int(downpayment):,} Down*"
+        except ValueError:
+            p_str = str(price)
+            
+        font_price = get_font("Playfair-Bold", p_font_size, base_dir)
+        
+        bbox_p = draw.textbbox((0, 0), p_str, font=font_price)
+        while (bbox_p[2] - bbox_p[0]) > (tw * 0.9):
+            p_font_size -= 4
+            font_price = get_font("Playfair-Bold", p_font_size, base_dir)
+            bbox_p = draw.textbbox((0, 0), p_str, font=font_price)
+            
+        p_x = (tw - (bbox_p[2] - bbox_p[0])) // 2
+        draw.text((p_x, y_dp), p_str, font=font_price, fill=color_white)
+
+    # --- 3. LOGO REMOVED FOR CLEANER LOOK ---
+
+    # ==========================================================
+    # BOTTOM-UP STACKING: Prevents overlaps on any screen ratio
+    # ==========================================================
+
+    # --- 4. FOOTERS (Anchor to Bottom) ---
     agent_name = agent if agent else "Agent"
     broker_name = broker if broker else "Brokerage"
     compliance_str = f"Listed by {agent_name} | {broker_name}"
+    disc_str = "*Est. 3% conventional down payment. Subject to approval. Not a commitment to lend."
     
-    comp_bbox = draw.textbbox((0, 0), compliance_str, font=f_footer)
-    draw_text_with_shadow(draw, ((tw - (comp_bbox[2] - comp_bbox[0])) // 2, th - int(th * 0.04)), compliance_str, f_footer, color_white, offset=1)
+    footer_size = int(base_scale * 0.022)
+    disc_size = int(base_scale * 0.016)
+    
+    f_footer = get_font("Montserrat-Bold", footer_size, base_dir)
+    f_disc = get_font("Montserrat-Bold", disc_size, base_dir)
+    
+    # Bottom anchor
+    y_disc = th - int(base_scale * 0.04)
+    disc_w = draw.textlength(disc_str, font=f_disc)
+    draw.text(((tw - disc_w) // 2, y_disc), disc_str, font=f_disc, fill=(210, 210, 210, 255))
+    
+    # Stack above disc
+    y_footer_base = y_disc - int(base_scale * 0.035)
+    comp_w = draw.textlength(compliance_str, font=f_footer)
+    draw.text(((tw - comp_w) // 2, y_footer_base), compliance_str, font=f_footer, fill=color_white)
+
+    # --- 5. MODERN SPECS (Stack above Footer) ---
+    y_specs = y_footer_base - int(base_scale * 0.08) 
+    
+    if show_details:
+        details = []
+        if beds: details.append(('bed', str(beds), "BEDS"))
+        if baths: details.append(('bath', str(baths), "BATHS"))
+        if sqft: details.append(('sqft', str(sqft), "SQFT"))
+        
+        if details:
+            icon_size = int(base_scale * 0.040)
+            gap_icon_text = int(base_scale * 0.015)
+            gap_items = int(base_scale * 0.06)
+            
+            f_num = get_font("Montserrat-Bold", int(base_scale * 0.038), base_dir)
+            f_lbl = get_font("Montserrat-Bold", int(base_scale * 0.038), base_dir)
+            
+            blocks = []
+            total_w = 0
+            for itype, num, lbl in details:
+                num_w = draw.textlength(num, font=f_num)
+                lbl_w = draw.textlength(" " + lbl, font=f_lbl)
+                w = icon_size + gap_icon_text + num_w + lbl_w
+                blocks.append((itype, num, lbl, w))
+                total_w += w
+                
+            total_w += gap_items * (len(blocks) - 1)
+            
+            scale_factor = 1.0
+            if total_w > (tw * 0.95):
+                scale_factor = (tw * 0.95) / total_w
+                icon_size = int(icon_size * scale_factor)
+                gap_icon_text = int(gap_icon_text * scale_factor)
+                gap_items = int(gap_items * scale_factor)
+                f_num = get_font("Montserrat-Bold", int(base_scale * 0.038 * scale_factor), base_dir)
+                f_lbl = get_font("Montserrat-Bold", int(base_scale * 0.038 * scale_factor), base_dir)
+                
+                blocks, total_w = [], 0
+                for itype, num, lbl in details:
+                    num_w = draw.textlength(num, font=f_num)
+                    lbl_w = draw.textlength(" " + lbl, font=f_lbl)
+                    w = icon_size + gap_icon_text + num_w + lbl_w
+                    blocks.append((itype, num, lbl, w))
+                    total_w += w
+                total_w += gap_items * (len(blocks) - 1)
+
+            curr_x = (tw - total_w) // 2
+            icon_center_y = y_specs
+            
+            for i, (itype, num, lbl, bw) in enumerate(blocks):
+                paths = BED_PATHS if itype == 'bed' else BATH_PATHS if itype == 'bath' else SQFT_PATHS
+                
+                draw_unit_icon(draw, paths, curr_x + (icon_size // 2), icon_center_y, icon_size, color_white)
+                curr_x += icon_size + gap_icon_text
+                
+                num_bbox = draw.textbbox((0, 0), num, font=f_num)
+                num_y = icon_center_y - ((num_bbox[3] - num_bbox[1]) // 2) - 4
+                draw.text((curr_x, num_y), num, font=f_num, fill=color_white)
+                curr_x += draw.textlength(num, font=f_num)
+                
+                lbl_str = " " + lbl
+                lbl_bbox = draw.textbbox((0, 0), lbl_str, font=f_lbl)
+                lbl_y = icon_center_y - ((lbl_bbox[3] - lbl_bbox[1]) // 2) - 4
+                draw.text((curr_x, lbl_y), lbl_str, font=f_lbl, fill=color_white)
+                curr_x += draw.textlength(lbl_str, font=f_lbl)
+                
+                if i < len(blocks) - 1:
+                    div_x = int(curr_x + (gap_items / 2))
+                    div_y_start = icon_center_y - (icon_size // 2)
+                    div_y_end = icon_center_y + (icon_size // 2)
+                    draw.line([(div_x, div_y_start), (div_x, div_y_end)], fill=(255, 255, 255, 180), width=2)
+                    curr_x += gap_items
+
+    # --- 6. MASSIVE CITY & PIN (Stack above Specs) ---
+    loc_text = city_state.upper()
+    
+    loc_size = int(base_scale * 0.12) 
+    f_loc = get_font("Playfair-Bold", loc_size, base_dir)
+    
+    loc_w = draw.textlength(loc_text, font=f_loc)
+    pin_size = int(loc_size * 0.7)
+    pin_scale = pin_size / 85.0
+    gap_loc = int(base_scale * 0.02)
+    
+    total_loc_w = pin_size + gap_loc + loc_w
+    
+    while total_loc_w > (tw * 0.90) and loc_size > 30:
+        loc_size -= 4
+        f_loc = get_font("Playfair-Bold", loc_size, base_dir)
+        loc_w = draw.textlength(loc_text, font=f_loc)
+        pin_size = int(loc_size * 0.7)
+        pin_scale = pin_size / 85.0
+        total_loc_w = pin_size + gap_loc + loc_w
+
+    # Anchor dynamically above specs
+    y_addr = y_specs - int(loc_size * 1.2) - int(base_scale * 0.04) 
+
+    curr_x = (tw - total_loc_w) // 2
+    
+    draw_vector_map_pin(draw, curr_x + (pin_size // 2), y_addr + (pin_size // 2), scale=pin_scale)
+    draw.text((curr_x + pin_size + gap_loc, y_addr - int(loc_size * 0.05)), loc_text, font=f_loc, fill=color_white)
+
+    # --- 7. CATCHY VISUAL HOOK (Dynamically centered in remaining space) ---
+    display_hook = hook_text if hook_text else status
+    if display_hook.strip() == "Explore this beautiful property.":
+        display_hook = f"Stunning New Listing in {city_state.split(',')[0].title()}"
+
+    if display_hook:
+        hook_size = int(base_scale * 0.065)
+        f_hook = get_font("Playfair-Bold", hook_size, base_dir)
+        
+        wrapped_hook = textwrap.wrap(display_hook.strip(), width=25)
+        
+        max_w = max([draw.textlength(line, font=f_hook) for line in wrapped_hook] + [0])
+        while max_w > (tw * 0.90) and hook_size > 20:
+            hook_size -= 2
+            f_hook = get_font("Playfair-Bold", hook_size, base_dir)
+            max_w = max([draw.textlength(line, font=f_hook) for line in wrapped_hook] + [0])
+
+        total_hook_h = len(wrapped_hook) * (hook_size * 1.2)
+        
+        # Smart Calculation: Find exact middle between Downpayment and City
+        available_space_top = y_dp + p_font_size
+        available_space_bottom = y_addr
+        center_y = available_space_top + (available_space_bottom - available_space_top) // 2
+        
+        y_cursor = int(center_y - (total_hook_h / 2))
+
+        for line in wrapped_hook:
+            line_w = draw.textlength(line, font=f_hook)
+            x_pos = (tw - line_w) // 2
+            draw.text((x_pos, y_cursor), line, font=f_hook, fill=color_white)
+            y_cursor += int(hook_size * 1.2)
 
     temp = os.path.join(base_dir, f"temp_title_{job_id}.png")
     overlay_img.save(temp)
@@ -1153,7 +1291,7 @@ async def render_cinematic_video(job_id, req, output_path, base_dir):
         set_progress(job_id, 50)
         render_logger = JobRenderLogger(job_id, start_progress=50, end_progress=99)
         final.write_videofile(
-            output_path, fps=24, codec="libx264", audio_codec="aac", 
+            output_path, fps=30, codec="libx264", audio_codec="aac", 
             threads=4, preset="medium", logger=render_logger, 
             bitrate="8000k", ffmpeg_params=["-movflags", "faststart"]
         )

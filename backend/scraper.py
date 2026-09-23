@@ -112,8 +112,21 @@ def fetch_zillow_data(url: str, job_id: str):
     except Exception as test_e:
         print(f"Test API failed (ignoring safely): {test_e}")
 
-    image_urls = data.get("image_urls", [])
-    unique_urls = list(dict.fromkeys(image_urls))
+    # ---------------------------------------------------------
+    # 3. PROCEED WITH IMAGE DOWNLOADS (UPGRADED TO HIGH-RES)
+    # ---------------------------------------------------------
+    raw_image_urls = data.get("image_urls", [])
+    
+    # Force Zillow's CDN to give us the absolute maximum resolution photos
+    # by swapping out the low-res thumbnail suffixes for the 1536 HD suffix
+    high_res_urls = []
+    for img_url in raw_image_urls:
+        if img_url:
+            # Replaces things like -p_e.jpg, -p_c.jpg, or -cc_ft_384.jpg
+            clean_url = re.sub(r'-(p_[a-zA-Z]|cc_ft_[0-9]+)\.jpg', '-uncropped_scaled_within_1536_1152.jpg', img_url)
+            high_res_urls.append(clean_url)
+            
+    unique_urls = list(dict.fromkeys(high_res_urls))
     
     job_folder = os.path.join(INPUT_FOLDER, job_id)
     os.makedirs(job_folder, exist_ok=True)
@@ -122,6 +135,11 @@ def fetch_zillow_data(url: str, job_id: str):
     for i, img_url in enumerate(unique_urls[:20]):
         try:
             res = requests.get(img_url, timeout=10)
+            # Sometimes Zillow rejects the forced high-res URL if the agent uploaded a tiny photo
+            if res.status_code != 200:
+                # Fallback to the original URL if the high-res hack fails
+                res = requests.get(raw_image_urls[i], timeout=10)
+                
             res.raise_for_status()
             file_path = os.path.join(job_folder, f"{zpid}_{i:02d}.jpg") 
             with open(file_path, 'wb') as f:
