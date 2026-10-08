@@ -29,8 +29,7 @@ import {
   LayoutDashboard,
   Image as ImageIcon,
   Instagram,
-  User,
-  Type // Added the Type icon for the new Text Carousel section
+  User 
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -494,13 +493,6 @@ export default function CinematicListingApp() {
 
   const [carouselFormat, setCarouselFormat] = useState("4:5 (Standard Post)"); 
 
-  // --- TEXT CAROUSEL STATE ---
-  const [textSlidesInput, setTextSlidesInput] = useState("");
-  const [isDownloadingText, setIsDownloadingText] = useState(false);
-
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
-
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
   const [showCaptions, setShowCaptions] = useState(true);
   const [enableVoice, setEnableVoice] = useState(true);
@@ -876,37 +868,7 @@ export default function CinematicListingApp() {
     setScenes(newScenes);
   };
 
-  const handleGenerateAIText = async (promptOverride?: string) => {
-    const promptToUse = promptOverride || aiPrompt;
-    if (!promptToUse) return;
-    
-    setIsGeneratingAi(true);
-    try {
-      // Build context string if they are currently working on a listing
-      const contextStr = meta.address ? `${meta.address} listed at ${meta.price}. ${meta.beds} beds, ${meta.baths} baths.` : "";
-      
-      const res = await fetch(`${API_URL}/api/generate-ai-text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: promptToUse, context_data: contextStr })
-      });
-      
-      if (!res.ok) throw new Error("Failed to generate");
-      const data = await res.json();
-      
-      if (data.text) {
-        setTextSlidesInput(data.text);
-        toast.success("AI Magic applied!");
-      }
-    } catch (e) {
-      toast.error("Failed to generate AI text.");
-    } finally {
-      setIsGeneratingAi(false);
-      setAiPrompt("");
-    }
-  };
-
-  const handleDownloadCarousel = async () => {
+const handleDownloadCarousel = async () => {
       setIsDownloading(true);
       
       const payload = {
@@ -918,7 +880,6 @@ export default function CinematicListingApp() {
           primary_color: primaryColor,
           format: format,
           carousel_format: carouselFormat,
-          
           language: language,
           voice: voice,
           font: font,
@@ -960,57 +921,6 @@ export default function CinematicListingApp() {
       } finally {
           setIsDownloading(false);
       }
-  };
-
-  // --- TEXT QUOTE CAROUSEL HANDLER ---
-  const handleDownloadTextCarousel = async () => {
-    if (!textSlidesInput.trim()) {
-      toast.error("Please enter some text for your slides.");
-      return;
-    }
-    setIsDownloadingText(true);
-    
-    const lines = textSlidesInput.split('\n').filter(line => line.trim() !== '');
-    
-    // --- UPDATED PAYLOAD ---
-    const payload = {
-        slides: lines,
-        social_handle: meta.social_handle || "Realtor",
-        carousel_format: carouselFormat,
-        font: font,
-        headshot_data: meta.headshot_data || "" // Sends your profile pic!
-    };
-
-    try {
-        const response = await fetch(`${API_URL}/api/generate-text-carousel`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const err = await response.json();
-            console.error("Backend Error Details:", err);
-            throw new Error("Failed to generate text carousel");
-        }
-
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `text_carousel_${new Date().getTime()}.zip`);
-        document.body.appendChild(link);
-        link.click();
-        
-        link.parentNode?.removeChild(link);
-        window.URL.revokeObjectURL(url);
-        toast.success("Text carousel downloaded successfully!");
-    } catch (error) {
-        console.error("Error downloading text carousel:", error);
-        toast.error("Failed to download the text carousel. Check console.");
-    } finally {
-        setIsDownloadingText(false);
-    }
   };
 
   return (
@@ -1531,12 +1441,6 @@ export default function CinematicListingApp() {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => setStep(1)}
-                  className="text-slate-400 font-bold text-sm mt-4 hover:text-slate-900 transition-colors"
-                >
-                  Create Another Tour
-                </button>
               </div>
             </div>
           )}
@@ -1561,6 +1465,7 @@ export default function CinematicListingApp() {
                     type="text"
                     value={(meta as any)[f.key]}
                     onChange={(e) => {
+                      // Apply uppercase transformation for address as per user corrections
                       const val = f.key === "address" ? e.target.value.toUpperCase() : e.target.value;
                       setMeta({ ...meta, [f.key]: val })
                     }}
@@ -1642,75 +1547,6 @@ export default function CinematicListingApp() {
             </section>
           )}
 
-          {/* --- NEW TEXT QUOTE CAROUSEL SECTION --- */}
-          
-            {/* --- NEW TEXT QUOTE CAROUSEL SECTION --- */}
-          <section className="space-y-4 pt-4">
-            <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
-              <Type className="w-3.5 h-3.5" /> Quote Carousel
-            </h3>
-            <div className="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm space-y-4">
-              
-              {/* AI MAGIC INPUT */}
-              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 p-4 rounded-2xl space-y-3">
-                <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs">
-                  <span className="text-lg">✨</span> Ask AI to write it
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={aiPrompt}
-                    onChange={(e) => setAiPrompt(e.target.value)}
-                    placeholder="e.g. 3 tips for first time buyers..."
-                    className="w-full bg-white border border-indigo-100 rounded-xl p-2.5 text-xs outline-none focus:border-indigo-400"
-                    onKeyDown={(e) => e.key === 'Enter' && handleGenerateAIText()}
-                  />
-                  <button 
-                    onClick={() => handleGenerateAIText()}
-                    disabled={isGeneratingAi || !aiPrompt}
-                    className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white p-2.5 rounded-xl transition-all"
-                  >
-                    {isGeneratingAi ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
-                  </button>
-                </div>
-                
-                {/* QUICK IDEAS BUTTONS */}
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  <button onClick={() => handleGenerateAIText("Tease this specific property listing without giving away the exact address.")} className="text-[10px] bg-white border border-indigo-100 text-indigo-600 px-2 py-1 rounded-md hover:bg-indigo-100">
-                    🏠 Property Teaser
-                  </button>
-                  <button onClick={() => handleGenerateAIText("3 brutal truths about waiting for interest rates to drop.")} className="text-[10px] bg-white border border-indigo-100 text-indigo-600 px-2 py-1 rounded-md hover:bg-indigo-100">
-                    📉 Rate Reality Check
-                  </button>
-                  <button onClick={() => handleGenerateAIText("A highly motivational quote about building generational wealth through real estate.")} className="text-[10px] bg-white border border-indigo-100 text-indigo-600 px-2 py-1 rounded-md hover:bg-indigo-100">
-                    💪 Wealth Quote
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-[11px] text-slate-500 font-bold uppercase block">
-                  Slides Content
-                </label>
-                <textarea
-                  value={textSlidesInput}
-                  onChange={(e) => setTextSlidesInput(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors h-32 resize-none custom-scrollbar"
-                  placeholder="Slide 1 text here...&#10;Slide 2 text here...&#10;Slide 3 text here..."
-                />
-              </div>
-              <button
-                onClick={handleDownloadTextCarousel}
-                disabled={isDownloadingText || !textSlidesInput.trim()}
-                className="w-full bg-slate-900 hover:bg-black text-white py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {isDownloadingText ? <Loader2 className="animate-spin w-4 h-4" /> : <Download className="w-4 h-4" />}
-                Download Quotes
-              </button>
-            </div>
-          </section>
-          
-
           <section className="space-y-4 pt-4">
             <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">
               Market Compliance
@@ -1742,7 +1578,7 @@ export default function CinematicListingApp() {
                 <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-500">
                   <input
                     type="text"
-                    placeholder="Listing Agent"
+                    placeholder="e.g., Bernardo Jimenez"
                     value={meta.agent}
                     onChange={(e) =>
                       setMeta({ ...meta, agent: e.target.value })
@@ -1751,7 +1587,7 @@ export default function CinematicListingApp() {
                   />
                   <input
                     type="text"
-                    placeholder="Brokerage Name"
+                    placeholder="e.g., Barcias Realty"
                     value={meta.brokerage}
                     onChange={(e) =>
                       setMeta({ ...meta, brokerage: e.target.value })
@@ -1931,6 +1767,11 @@ export default function CinematicListingApp() {
                 <ImageIcon className="w-3.5 h-3.5" /> Instagram Carousel
               </h3>
               <div className="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm space-y-4">
+                <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                  Instantly download a ready-to-post photo carousel formatted for Instagram or TikTok.
+                </p>
+                
+                {/* NEW DROPDOWN ADDED HERE */}
                 <div className="space-y-2">
                   <label className="text-[11px] text-slate-500 font-bold uppercase block">
                     Carousel Format
@@ -1969,39 +1810,6 @@ export default function CinematicListingApp() {
             </section>
           )}
 
-          {/* --- NEW TEXT QUOTE CAROUSEL SECTION (MOBILE) --- */}
-          {step > 1 && (
-            <section className="space-y-4 pt-4">
-              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
-                <Type className="w-3.5 h-3.5" /> Quote Carousel
-              </h3>
-              <div className="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm space-y-4">
-                <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                  Generate minimalist text quote slides. Each line creates a new slide.
-                </p>
-                <div className="space-y-2">
-                  <label className="text-[11px] text-slate-500 font-bold uppercase block">
-                    Slides Content
-                  </label>
-                  <textarea
-                    value={textSlidesInput}
-                    onChange={(e) => setTextSlidesInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors h-32 resize-none custom-scrollbar"
-                    placeholder="Slide 1 text here...&#10;Slide 2 text here...&#10;Slide 3 text here..."
-                  />
-                </div>
-                <button
-                  onClick={handleDownloadTextCarousel}
-                  disabled={isDownloadingText || !textSlidesInput.trim()}
-                  className="w-full bg-slate-900 hover:bg-black text-white py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {isDownloadingText ? <Loader2 className="animate-spin w-4 h-4" /> : <Download className="w-4 h-4" />}
-                  Download Quotes
-                </button>
-              </div>
-            </section>
-          )}
-
           <section className="space-y-4 pt-4">
             <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">
               Market Compliance
@@ -2033,7 +1841,7 @@ export default function CinematicListingApp() {
                 <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-500">
                   <input
                     type="text"
-                    placeholder="Listing Agent"
+                    placeholder="e.g., Bernardo Jimenez"
                     value={meta.agent}
                     onChange={(e) =>
                       setMeta({ ...meta, agent: e.target.value })
@@ -2042,7 +1850,7 @@ export default function CinematicListingApp() {
                   />
                   <input
                     type="text"
-                    placeholder="Brokerage Name"
+                    placeholder="e.g., Barcias Realty"
                     value={meta.brokerage}
                     onChange={(e) =>
                       setMeta({ ...meta, brokerage: e.target.value })

@@ -297,6 +297,116 @@ def resize_and_crop(img_path, target_w=1080, target_h=1350):
     
     return img.crop((left, top, right, bottom))
 
+def create_text_slide(text, social_handle, font_choice, base_dir, headshot_path=None, target_w=1080, target_h=1350):
+    # Premium Off-White Canvas 
+    img = Image.new('RGB', (target_w, target_h), (252, 252, 252)) 
+    draw = ImageDraw.Draw(img)
+
+    scale = target_h / 1350.0
+    
+    # Decorative Quote Mark
+    try:
+        quote_font = get_font(font_choice, int(250 * scale), base_dir)
+        draw.text((target_w * 0.12, target_h * 0.10), "“", font=quote_font, fill=(240, 240, 240))
+    except: pass
+
+    # Dynamic Text Sizing & Wrapping
+    max_text_width = target_w * 0.78 
+    font_size = int(85 * scale)
+    main_font = get_font(font_choice, font_size, base_dir)
+    
+    def get_wrapped_lines(text_str, font, max_w):
+        lines = []
+        for paragraph in text_str.split('\n'):
+            words = paragraph.split()
+            current_line = ""
+            for word in words:
+                test_line = f"{current_line} {word}".strip()
+                bbox = draw.textbbox((0,0), test_line, font=font)
+                if (bbox[2] - bbox[0]) <= max_w:
+                    current_line = test_line
+                else:
+                    if current_line: lines.append(current_line)
+                    current_line = word
+            if current_line: lines.append(current_line)
+        return lines
+
+    lines = get_wrapped_lines(text, main_font, max_text_width)
+    line_spacing = int(25 * scale)
+    
+    while True:
+        line_heights = [draw.textbbox((0, 0), line, font=main_font)[3] - draw.textbbox((0, 0), line, font=main_font)[1] for line in lines]
+        total_text_height = sum(line_heights) + (line_spacing * (len(lines) - 1))
+        
+        if total_text_height < target_h * 0.45 or font_size <= int(40 * scale):
+            break
+        font_size -= 4
+        main_font = get_font(font_choice, font_size, base_dir)
+        lines = get_wrapped_lines(text, main_font, max_text_width)
+
+    # Draw Centered Quote Text
+    start_y = (target_h - total_text_height) // 2 - int(60 * scale)
+    current_y = start_y
+    for line, h in zip(lines, line_heights):
+        bbox = draw.textbbox((0,0), line, font=main_font)
+        line_w = bbox[2] - bbox[0]
+        x = (target_w - line_w) // 2
+        draw.text((x, current_y), line, font=main_font, fill=(30, 30, 32))
+        current_y += h + line_spacing
+
+    # --- Draw Elegant Footer Stack ---
+    footer_start_y = target_h - int(340 * scale)
+    
+    # Subtle divider
+    divider_w = int(120 * scale)
+    draw.line([(target_w - divider_w)//2, footer_start_y, (target_w + divider_w)//2, footer_start_y], fill=(220, 220, 222), width=int(2*scale))
+    
+    footer_y = footer_start_y + int(50 * scale)
+    
+    # Avatar
+    if headshot_path and os.path.exists(headshot_path):
+        avatar_size = int(110 * scale)
+        try:
+            hs = Image.open(headshot_path).convert("RGBA")
+            min_side = min(hs.size)
+            left = (hs.width - min_side)/2
+            top = (hs.height - min_side)/2
+            hs = hs.crop((left, top, left+min_side, top+min_side))
+            hs = hs.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
+            
+            mask = Image.new("L", (avatar_size, avatar_size), 0)
+            mask_draw = ImageDraw.Draw(mask)
+            mask_draw.ellipse((0, 0, avatar_size, avatar_size), fill=255)
+            hs.putalpha(mask)
+            
+            avatar_x = (target_w - avatar_size) // 2
+            img.paste(hs, (avatar_x, footer_y), hs)
+            draw.ellipse((avatar_x, footer_y, avatar_x + avatar_size, footer_y + avatar_size), outline=(210, 210, 212), width=int(3*scale))
+            
+            footer_y += avatar_size + int(25 * scale)
+        except Exception as e:
+            print("Avatar render error:", e)
+
+    # Social Handle (FIXED FONT SCALING)
+    if not social_handle:
+        social_handle = "Real Estate" # Fallback if empty
+        
+    if social_handle:
+        handle_font_size = int(24 * scale)
+        # Re-using font_choice ensures it scales correctly and doesn't shrink to 10px!
+        handle_font = get_font(font_choice, handle_font_size, base_dir) 
+        clean_handle = social_handle if social_handle.startswith("@") else f"@{social_handle}"
+        
+        spaced_handle = "   ".join(char for char in clean_handle.upper())
+        bbox = draw.textbbox((0, 0), spaced_handle, font=handle_font)
+        handle_w = bbox[2] - bbox[0]
+        hx = (target_w - handle_w) // 2
+        
+        # Darkened slightly for better visibility
+        draw.text((hx, footer_y), spaced_handle, font=handle_font, fill=(90, 90, 95))
+        
+    return img
+
 def create_carousel_cover(img_path, location, beds, baths, sqft, tagline, price, base_dir, target_w=1080, target_h=1350):
     base_img = resize_and_crop(img_path, target_w, target_h)
     
@@ -577,20 +687,22 @@ def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_d
 
 
 
-def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None, hide_exact_addr=False, hook_text=None):
+import textwrap
+import math
+
+# ---> Added is_own_listing, listing_agent, and listing_brokerage to the arguments <---
+def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None, hide_exact_addr=False, hook_text=None, is_own_listing=True, listing_agent=None, listing_brokerage=None):
     if not show_details: return []
     color_white = (255, 255, 255, 255)
 
     overlay_img = Image.new('RGBA', (tw, th), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay_img)
     
-    # Use min(tw, th) so fonts don't blow up on landscape videos
     base_scale = min(tw, th)
     
-    # --- 1. Top & Bottom Gradients (Darkened for shadowless text visibility) ---
+    # --- 1. Top & Bottom Gradients ---
     bottom_scrim = Image.new('RGBA', (tw, th), (0,0,0,0))
     bottom_draw = ImageDraw.Draw(bottom_scrim)
-    # Pushed scrim higher to cover the stacked elements
     scrim_start = int(th * 0.35) 
     for y in range(scrim_start, th):
         progress = (y - scrim_start) / (th - scrim_start)
@@ -636,36 +748,46 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
         p_x = (tw - (bbox_p[2] - bbox_p[0])) // 2
         draw.text((p_x, y_dp), p_str, font=font_price, fill=color_white)
 
-    # --- 3. LOGO REMOVED FOR CLEANER LOOK ---
-
     # ==========================================================
-    # BOTTOM-UP STACKING: Prevents overlaps on any screen ratio
+    # BOTTOM-UP STACKING
     # ==========================================================
 
-    # --- 4. FOOTERS (Anchor to Bottom) ---
-    agent_name = agent if agent else "Agent"
-    broker_name = broker if broker else "Brokerage"
-    compliance_str = f"Listed by {agent_name} | {broker_name}"
+    # --- 3. DYNAMIC FOOTERS & COMPLIANCE ---
+    compliance_str = ""
+    if is_own_listing:
+        # If it's your listing, use your profile name
+        agent_name = agent if agent else "Agent"
+        broker_name = broker if broker else "Brokerage"
+        compliance_str = f"Listed by {agent_name} | {broker_name}"
+    else:
+        # If it's NOT your listing, check if Zillow found the agent
+        if listing_agent or listing_brokerage:
+            la = listing_agent if listing_agent else "Listing Agent"
+            lb = listing_brokerage if listing_brokerage else "Brokerage"
+            compliance_str = f"Listing Courtesy of {la} | {lb}"
+        # If the API failed, compliance_str remains empty and draws nothing
+
     disc_str = "*Est. 3% conventional down payment. Subject to approval. Not a commitment to lend."
-    
     footer_size = int(base_scale * 0.022)
     disc_size = int(base_scale * 0.016)
     
     f_footer = get_font("Montserrat-Bold", footer_size, base_dir)
     f_disc = get_font("Montserrat-Bold", disc_size, base_dir)
     
-    # Bottom anchor
+    # Draw Downpayment Disclaimer at the absolute bottom
     y_disc = th - int(base_scale * 0.04)
     disc_w = draw.textlength(disc_str, font=f_disc)
     draw.text(((tw - disc_w) // 2, y_disc), disc_str, font=f_disc, fill=(210, 210, 210, 255))
     
-    # Stack above disc
-    y_footer_base = y_disc - int(base_scale * 0.035)
-    comp_w = draw.textlength(compliance_str, font=f_footer)
-    draw.text(((tw - comp_w) // 2, y_footer_base), compliance_str, font=f_footer, fill=color_white)
+    # Draw Compliance (only if there is text to draw)
+    y_cursor_bottom = y_disc - int(base_scale * 0.035)
+    if compliance_str:
+        comp_w = draw.textlength(compliance_str, font=f_footer)
+        draw.text(((tw - comp_w) // 2, y_cursor_bottom), compliance_str, font=f_footer, fill=color_white)
+        y_cursor_bottom -= int(base_scale * 0.04) # Push the specs up to make room
 
-    # --- 5. MODERN SPECS (Stack above Footer) ---
-    y_specs = y_footer_base - int(base_scale * 0.08) 
+    # --- 4. MODERN SPECS (Stack above Footer) ---
+    y_specs = y_cursor_bottom - int(base_scale * 0.04) 
     
     if show_details:
         details = []
@@ -737,9 +859,8 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
                     draw.line([(div_x, div_y_start), (div_x, div_y_end)], fill=(255, 255, 255, 180), width=2)
                     curr_x += gap_items
 
-    # --- 6. MASSIVE CITY & PIN (Stack above Specs) ---
+    # --- 5. MASSIVE CITY & PIN (Stack above Specs) ---
     loc_text = city_state.upper()
-    
     loc_size = int(base_scale * 0.12) 
     f_loc = get_font("Playfair-Bold", loc_size, base_dir)
     
@@ -758,15 +879,13 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
         pin_scale = pin_size / 85.0
         total_loc_w = pin_size + gap_loc + loc_w
 
-    # Anchor dynamically above specs
     y_addr = y_specs - int(loc_size * 1.2) - int(base_scale * 0.04) 
-
     curr_x = (tw - total_loc_w) // 2
     
     draw_vector_map_pin(draw, curr_x + (pin_size // 2), y_addr + (pin_size // 2), scale=pin_scale)
     draw.text((curr_x + pin_size + gap_loc, y_addr - int(loc_size * 0.05)), loc_text, font=f_loc, fill=color_white)
 
-    # --- 7. CATCHY VISUAL HOOK (Dynamically centered in remaining space) ---
+    # --- 6. CATCHY VISUAL HOOK (Dynamically centered) ---
     display_hook = hook_text if hook_text else status
     if display_hook.strip() == "Explore this beautiful property.":
         display_hook = f"Stunning New Listing in {city_state.split(',')[0].title()}"
@@ -785,7 +904,6 @@ def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, la
 
         total_hook_h = len(wrapped_hook) * (hook_size * 1.2)
         
-        # Smart Calculation: Find exact middle between Downpayment and City
         available_space_top = y_dp + p_font_size
         available_space_bottom = y_addr
         center_y = available_space_top + (available_space_bottom - available_space_top) // 2
