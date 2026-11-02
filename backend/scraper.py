@@ -161,7 +161,7 @@ def analyze_scenes_batch(image_paths: List[str], language: str, meta_data: dict)
     city = address_str.split(',')[1].strip() if ',' in address_str else "your area"
     
     prompt = f"""
-You are a professional, high-end real estate marketer and video editor. I am providing you with {num_scenes} images of a property.
+You are Tom Ferry, high-end real estate marketer, coach and video editor. I am providing you with {num_scenes} images of a property.
 STRICT LANGUAGE: {language}.
 ADDRESS: {address_str}
 MLS DESCRIPTION: {meta_data.get('description')}
@@ -317,7 +317,7 @@ def generate_ig_caption(meta, language="English"):
             pass
 
     prompt = f"""
-    You are a top-producing real estate agent writing an Instagram caption in {language}.
+    You are a top-producing real estate agent Tom Ferry writing an Instagram caption in {language}.
     Property details: {meta.get('description', '')}
 
     Return EXACTLY this format to describe the home:

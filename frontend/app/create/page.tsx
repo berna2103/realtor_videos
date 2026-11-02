@@ -30,7 +30,7 @@ import {
   Image as ImageIcon,
   Instagram,
   User,
-  Type // Added the Type icon for the new Text Carousel section
+  Type
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -156,16 +156,43 @@ const SidebarSettings = ({
         <Palette className="w-3.5 h-3.5" /> Branding & Leads
       </h3>
       <div className="space-y-5">
-        <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-semibold text-slate-600">
-            Theme Color
-          </span>
-          <input
-            type="color"
-            value={primaryColor}
-            onChange={(e) => setPrimaryColor(e.target.value)}
-            className="w-8 h-8 rounded-full bg-transparent border-none cursor-pointer p-0 appearance-none shadow-inner"
-          />
+        
+        {/* --- BRAND COLOR PALETTE --- */}
+        <div className="space-y-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+              Brand Color
+            </span>
+            <input
+              type="color"
+              value={primaryColor}
+              onChange={(e) => setPrimaryColor(e.target.value)}
+              className="w-7 h-7 rounded-full bg-transparent border-none cursor-pointer p-0 appearance-none shadow-inner"
+              title="Custom Color"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
+            {[
+              { name: "Powersuit Blue", hex: "#10295A" },
+              { name: "Legacy Green", hex: "#1A9175" },
+              { name: "Power Pink", hex: "#DB1263" },
+              { name: "Misty Grey", hex: "#E6E7E8" },
+              { name: "Barely There", hex: "#F1F2F2" },
+              { name: "Pure White", hex: "#FFFFFF" }
+            ].map((c) => (
+              <button
+                key={c.hex}
+                onClick={() => setPrimaryColor(c.hex)}
+                title={c.name}
+                className={`w-6 h-6 rounded-full shadow-sm border transition-all hover:scale-110 ${
+                  primaryColor.toLowerCase() === c.hex.toLowerCase() 
+                    ? "border-slate-900 scale-110 ring-2 ring-slate-900/20" 
+                    : "border-slate-200"
+                }`}
+                style={{ backgroundColor: c.hex }}
+              />
+            ))}
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -406,10 +433,10 @@ const SidebarSettings = ({
             onChange={(e) => setFont(e.target.value)}
             className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-900 font-medium outline-none"
           >
+            <option value="Playfair">Playfair Display</option>
             <option value="Cinzel">Cinzel</option>
             <option value="Inter">Inter</option>
             <option value="Roboto">Roboto</option>
-            <option value="Playfair">Playfair Display</option>
           </select>
         </div>
 
@@ -493,11 +520,11 @@ export default function CinematicListingApp() {
   const [renderProgress, setRenderProgress] = useState(0);
 
   const [carouselFormat, setCarouselFormat] = useState("4:5 (Standard Post)"); 
+  const [layoutStyle, setLayoutStyle] = useState("Editorial Collage");
 
   // --- TEXT CAROUSEL STATE ---
   const [textSlidesInput, setTextSlidesInput] = useState("");
   const [isDownloadingText, setIsDownloadingText] = useState(false);
-
   const [aiPrompt, setAiPrompt] = useState("");
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
 
@@ -526,9 +553,9 @@ export default function CinematicListingApp() {
   const [format, setFormat] = useState("Vertical (1080x1920)");
   const [language, setLanguage] = useState("English");
   const [voice, setVoice] = useState("Professional/Clean");
-  const [font, setFont] = useState("Montserrat");
+  const [font, setFont] = useState("Playfair"); // Updated to default to Playfair
   const [music, setMusic] = useState("Upbeat");
-  const [primaryColor, setPrimaryColor] = useState("#006aff");
+  const [primaryColor, setPrimaryColor] = useState("#10295A"); 
   const [logoData, setLogoData] = useState<string | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [statusChoice, setStatusChoice] = useState("Just Listed");
@@ -876,36 +903,6 @@ export default function CinematicListingApp() {
     setScenes(newScenes);
   };
 
-  const handleGenerateAIText = async (promptOverride?: string) => {
-    const promptToUse = promptOverride || aiPrompt;
-    if (!promptToUse) return;
-    
-    setIsGeneratingAi(true);
-    try {
-      // Build context string if they are currently working on a listing
-      const contextStr = meta.address ? `${meta.address} listed at ${meta.price}. ${meta.beds} beds, ${meta.baths} baths.` : "";
-      
-      const res = await fetch(`${API_URL}/api/generate-ai-text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: promptToUse, context_data: contextStr })
-      });
-      
-      if (!res.ok) throw new Error("Failed to generate");
-      const data = await res.json();
-      
-      if (data.text) {
-        setTextSlidesInput(data.text);
-        toast.success("AI Magic applied!");
-      }
-    } catch (e) {
-      toast.error("Failed to generate AI text.");
-    } finally {
-      setIsGeneratingAi(false);
-      setAiPrompt("");
-    }
-  };
-
   const handleDownloadCarousel = async () => {
       setIsDownloading(true);
       
@@ -918,7 +915,6 @@ export default function CinematicListingApp() {
           primary_color: primaryColor,
           format: format,
           carousel_format: carouselFormat,
-          
           language: language,
           voice: voice,
           font: font,
@@ -927,7 +923,8 @@ export default function CinematicListingApp() {
           is_own_listing: isOwnListing,
           show_captions: showCaptions,
           enable_voice: enableVoice,
-          logo_data: logoData
+          logo_data: logoData,
+          layout_style: layoutStyle,
       };
 
       try {
@@ -962,7 +959,35 @@ export default function CinematicListingApp() {
       }
   };
 
-  // --- TEXT QUOTE CAROUSEL HANDLER ---
+  const handleGenerateAIText = async (promptOverride?: string) => {
+    const promptToUse = promptOverride || aiPrompt;
+    if (!promptToUse) return;
+    
+    setIsGeneratingAi(true);
+    try {
+      const contextStr = meta.address ? `${meta.address} listed at ${meta.price}. ${meta.beds} beds, ${meta.baths} baths.` : "";
+      
+      const res = await fetch(`${API_URL}/api/generate-ai-text`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: promptToUse, context_data: contextStr })
+      });
+      
+      if (!res.ok) throw new Error("Failed to generate");
+      const data = await res.json();
+      
+      if (data.text) {
+        setTextSlidesInput(data.text);
+        toast.success("AI Magic applied!");
+      }
+    } catch (e) {
+      toast.error("Failed to generate AI text.");
+    } finally {
+      setIsGeneratingAi(false);
+      setAiPrompt("");
+    }
+  };
+
   const handleDownloadTextCarousel = async () => {
     if (!textSlidesInput.trim()) {
       toast.error("Please enter some text for your slides.");
@@ -972,13 +997,13 @@ export default function CinematicListingApp() {
     
     const lines = textSlidesInput.split('\n').filter(line => line.trim() !== '');
     
-    // --- UPDATED PAYLOAD ---
     const payload = {
         slides: lines,
         social_handle: meta.social_handle || "Realtor",
         carousel_format: carouselFormat,
         font: font,
-        headshot_data: meta.headshot_data || "" // Sends your profile pic!
+        headshot_data: meta.headshot_data || "",
+        primary_color: primaryColor // <--- ADD THIS LINE!
     };
 
     try {
@@ -1012,6 +1037,7 @@ export default function CinematicListingApp() {
         setIsDownloadingText(false);
     }
   };
+
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] text-slate-900 font-sans flex flex-col overflow-hidden">
@@ -1072,9 +1098,8 @@ export default function CinematicListingApp() {
         </div>
       )}
 
-      
-    {/* --- TOP NAVIGATION --- */}
-      <nav className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur-xl flex items-center justify-between px-4 sm:px-8 z-30 relative">
+      {/* --- TOP NAVIGATION --- */}
+      <nav className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur-xl flex items-center justify-between px-4 sm:px-8 z-30 relative shrink-0">
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="bg-slate-900 p-1.5 sm:p-2 rounded-xl shadow-lg shadow-slate-200">
             <Video className="w-5 h-5 text-white" />
@@ -1264,7 +1289,6 @@ export default function CinematicListingApp() {
                 seconds. Paste the URL below to begin.
               </p>
               
-              {/* --- ENHANCED HERO INPUT WITH NEIGHBORHOOD CONTEXT --- */}
               <div className="p-3 bg-white border border-slate-200 rounded-[2rem] flex flex-col gap-3 shadow-2xl shadow-slate-200/60 ring-1 ring-black/5 max-w-3xl mx-auto text-left">
                 <div className="flex flex-col sm:flex-row gap-3 w-full">
                   <div className="flex-1 flex flex-col justify-center px-4 relative bg-slate-50 rounded-2xl border border-slate-100">
@@ -1296,7 +1320,6 @@ export default function CinematicListingApp() {
                   </button>
                 </div>
                 
-                {/* Neighborhood Context Field */}
                 <div className="px-2 pb-1">
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-2 mb-1 block">
                     Neighborhood Vibe (Optional)
@@ -1482,7 +1505,6 @@ export default function CinematicListingApp() {
                   Download 4K MP4
                 </button>
 
-                {/* ENHANCEMENT: Multi-Platform Social Drafts Panel */}
                 <div className="bg-white border border-slate-200 rounded-2xl p-4 text-left mt-2 shadow-sm">
                   <div className="flex gap-2 mb-3">
                     {["instagram", "tiktok", "facebook"].map((platform) => (
@@ -1592,7 +1614,7 @@ export default function CinematicListingApp() {
             </div>
           </section>
 
-          {/* --- NEW INSTAGRAM CAROUSEL SECTION --- */}
+          {/* --- INSTAGRAM CAROUSEL SECTION --- */}
           {step > 1 && (
             <section className="space-y-4 pt-4">
               <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
@@ -1602,12 +1624,24 @@ export default function CinematicListingApp() {
                 <p className="text-xs text-slate-500 leading-relaxed font-medium">
                   Instantly download a ready-to-post photo carousel formatted for Instagram or TikTok.
                 </p>
-                
-                {/* NEW DROPDOWN ADDED HERE */}
                 <div className="space-y-2">
                   <label className="text-[11px] text-slate-500 font-bold uppercase block">
                     Carousel Format
                   </label>
+                  <div className="space-y-2">
+                  <label className="text-[11px] text-slate-500 font-bold uppercase block">
+                    Layout Style
+                  </label>
+                  <select
+                    value={layoutStyle}
+                    onChange={(e) => setLayoutStyle(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors"
+                  >
+                    <option value="Editorial Collage">Editorial Collage (1-3 images per slide)</option>
+                    <option value="Seamless Panorama">Seamless Panorama (Flows across swipes)</option>
+                    <option value="Standard">Standard (1 full-bleed image per slide)</option>
+                  </select>
+                </div>
                   <select
                     value={carouselFormat}
                     onChange={(e) => setCarouselFormat(e.target.value)}
@@ -1642,9 +1676,7 @@ export default function CinematicListingApp() {
             </section>
           )}
 
-          {/* --- NEW TEXT QUOTE CAROUSEL SECTION --- */}
-          
-            {/* --- NEW TEXT QUOTE CAROUSEL SECTION --- */}
+          {/* --- TEXT QUOTE CAROUSEL SECTION --- */}
           <section className="space-y-4 pt-4">
             <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
               <Type className="w-3.5 h-3.5" /> Quote Carousel
@@ -1668,13 +1700,11 @@ export default function CinematicListingApp() {
                   <button 
                     onClick={() => handleGenerateAIText()}
                     disabled={isGeneratingAi || !aiPrompt}
-                    className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white p-2.5 rounded-xl transition-all"
+                    className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white p-2.5 rounded-xl transition-all shrink-0"
                   >
                     {isGeneratingAi ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
                   </button>
                 </div>
-                
-                {/* QUICK IDEAS BUTTONS */}
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   <button onClick={() => handleGenerateAIText("Tease this specific property listing without giving away the exact address.")} className="text-[10px] bg-white border border-indigo-100 text-indigo-600 px-2 py-1 rounded-md hover:bg-indigo-100">
                     🏠 Property Teaser
@@ -1709,7 +1739,6 @@ export default function CinematicListingApp() {
               </button>
             </div>
           </section>
-          
 
           <section className="space-y-4 pt-4">
             <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">
@@ -1785,18 +1814,20 @@ export default function CinematicListingApp() {
         </aside>
       </div>
 
+      {/* ========================================================= */}
+      {/* MOBILE UI ELEMENTS & MODALS (FIXED TOUCH & DUPLICATIONS)    */}
+      {/* ========================================================= */}
+
       {/* MOBILE LEFT DRAWER (SETTINGS) */}
-      <div
-        className={`fixed inset-0 z-[100] lg:hidden transition-all duration-300 ${isSettingsOpen ? "visible" : "invisible"}`}
-      >
+      <div className={`fixed inset-0 z-[100] lg:hidden ${isSettingsOpen ? "pointer-events-auto" : "pointer-events-none"}`}>
         <div
           className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-300 ${isSettingsOpen ? "opacity-100" : "opacity-0"}`}
           onClick={() => setIsSettingsOpen(false)}
         />
         <aside
-          className={`absolute top-0 bottom-0 left-0 w-[85vw] max-w-sm bg-white border-r border-slate-200 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar transition-transform duration-300 ease-in-out ${isSettingsOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}
+          className={`absolute top-0 bottom-0 left-0 w-[85vw] max-w-sm bg-white border-r border-slate-200 flex flex-col p-6 sm:p-8 gap-6 overflow-y-auto custom-scrollbar transition-transform duration-300 ease-in-out ${isSettingsOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"}`}
         >
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between shrink-0 mb-2">
             <h2 className="font-serif text-2xl font-bold text-slate-900">
               Settings
             </h2>
@@ -1854,18 +1885,16 @@ export default function CinematicListingApp() {
         </aside>
       </div>
 
-      {/* MOBILE RIGHT DRAWER (DETAILS) */}
-      <div
-        className={`fixed inset-0 z-[100] lg:hidden transition-all duration-300 ${isDetailsOpen ? "visible" : "invisible"}`}
-      >
+      {/* MOBILE RIGHT DRAWER (DETAILS & CAROUSELS) */}
+      <div className={`fixed inset-0 z-[100] lg:hidden ${isDetailsOpen ? "pointer-events-auto" : "pointer-events-none"}`}>
         <div
           className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-300 ${isDetailsOpen ? "opacity-100" : "opacity-0"}`}
           onClick={() => setIsDetailsOpen(false)}
         />
         <aside
-          className={`absolute top-0 bottom-0 right-0 w-[85vw] max-w-sm bg-white border-l border-slate-200 flex flex-col p-8 gap-8 overflow-y-auto custom-scrollbar transition-transform duration-300 ease-in-out ${isDetailsOpen ? "translate-x-0 shadow-2xl" : "translate-x-full"}`}
+          className={`absolute top-0 bottom-0 right-0 w-[85vw] max-w-sm bg-white border-l border-slate-200 flex flex-col p-6 sm:p-8 gap-6 overflow-y-auto custom-scrollbar transition-transform duration-300 ease-in-out ${isDetailsOpen ? "translate-x-0 shadow-2xl" : "translate-x-full"}`}
         >
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between shrink-0 mb-2">
             <h2 className="font-serif text-2xl font-bold text-slate-900">
               Details
             </h2>
@@ -1876,6 +1905,7 @@ export default function CinematicListingApp() {
               <X className="w-5 h-5" />
             </button>
           </div>
+          
           <section className="space-y-6">
             <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">
               Property Details
@@ -1924,7 +1954,7 @@ export default function CinematicListingApp() {
             </div>
           </section>
 
-          {/* MOBILE CAROUSEL SECTION */}
+          {/* MOBILE: INSTAGRAM PHOTO CAROUSEL */}
           {step > 1 && (
             <section className="space-y-4 pt-4">
               <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
@@ -1935,6 +1965,20 @@ export default function CinematicListingApp() {
                   <label className="text-[11px] text-slate-500 font-bold uppercase block">
                     Carousel Format
                   </label>
+                  <div className="space-y-2">
+                  <label className="text-[11px] text-slate-500 font-bold uppercase block">
+                    Layout Style
+                  </label>
+                  <select
+                    value={layoutStyle}
+                    onChange={(e) => setLayoutStyle(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors"
+                  >
+                    <option value="Editorial Collage">Editorial Collage (1-3 images per slide)</option>
+                    <option value="Seamless Panorama">Seamless Panorama (Flows across swipes)</option>
+                    <option value="Standard">Standard (1 full-bleed image per slide)</option>
+                  </select>
+                </div>
                   <select
                     value={carouselFormat}
                     onChange={(e) => setCarouselFormat(e.target.value)}
@@ -1944,7 +1988,6 @@ export default function CinematicListingApp() {
                     <option value="9:16 (Reel / TikTok)">9:16 (Reels / TikTok Story)</option>
                   </select>
                 </div>
-
                 <div className="space-y-2">
                   <label className="text-[11px] text-slate-500 font-bold uppercase block">
                     Cover Tagline
@@ -1969,38 +2012,65 @@ export default function CinematicListingApp() {
             </section>
           )}
 
-          {/* --- NEW TEXT QUOTE CAROUSEL SECTION (MOBILE) --- */}
-          {step > 1 && (
-            <section className="space-y-4 pt-4">
-              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
-                <Type className="w-3.5 h-3.5" /> Quote Carousel
-              </h3>
-              <div className="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm space-y-4">
-                <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                  Generate minimalist text quote slides. Each line creates a new slide.
-                </p>
-                <div className="space-y-2">
-                  <label className="text-[11px] text-slate-500 font-bold uppercase block">
-                    Slides Content
-                  </label>
-                  <textarea
-                    value={textSlidesInput}
-                    onChange={(e) => setTextSlidesInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors h-32 resize-none custom-scrollbar"
-                    placeholder="Slide 1 text here...&#10;Slide 2 text here...&#10;Slide 3 text here..."
-                  />
+          {/* MOBILE: TEXT QUOTE CAROUSEL */}
+          <section className="space-y-4 pt-4">
+            <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
+              <Type className="w-3.5 h-3.5" /> Quote Carousel
+            </h3>
+            <div className="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm space-y-4">
+              
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs">
+                  <span className="text-lg">✨</span> Ask AI to write it
                 </div>
-                <button
-                  onClick={handleDownloadTextCarousel}
-                  disabled={isDownloadingText || !textSlidesInput.trim()}
-                  className="w-full bg-slate-900 hover:bg-black text-white py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {isDownloadingText ? <Loader2 className="animate-spin w-4 h-4" /> : <Download className="w-4 h-4" />}
-                  Download Quotes
-                </button>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="e.g. 3 tips for first time buyers..."
+                    className="w-full bg-white border border-indigo-100 rounded-xl p-2.5 text-xs outline-none focus:border-indigo-400"
+                    onKeyDown={(e) => e.key === 'Enter' && handleGenerateAIText()}
+                  />
+                  <button 
+                    onClick={() => handleGenerateAIText()}
+                    disabled={isGeneratingAi || !aiPrompt}
+                    className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white p-2.5 rounded-xl transition-all shrink-0"
+                  >
+                    {isGeneratingAi ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  <button onClick={() => handleGenerateAIText("Tease this specific property listing without giving away the exact address.")} className="text-[10px] bg-white border border-indigo-100 text-indigo-600 px-2 py-1 rounded-md hover:bg-indigo-100">
+                    🏠 Property Teaser
+                  </button>
+                  <button onClick={() => handleGenerateAIText("3 brutal truths about waiting for interest rates to drop.")} className="text-[10px] bg-white border border-indigo-100 text-indigo-600 px-2 py-1 rounded-md hover:bg-indigo-100">
+                    📉 Rate Reality Check
+                  </button>
+                </div>
               </div>
-            </section>
-          )}
+
+              <div className="space-y-2">
+                <label className="text-[11px] text-slate-500 font-bold uppercase block">
+                  Slides Content
+                </label>
+                <textarea
+                  value={textSlidesInput}
+                  onChange={(e) => setTextSlidesInput(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 text-sm text-slate-900 outline-none focus:border-blue-500 transition-colors h-32 resize-none custom-scrollbar"
+                  placeholder="Slide 1 text here...&#10;Slide 2 text here...&#10;Slide 3 text here..."
+                />
+              </div>
+              <button
+                onClick={handleDownloadTextCarousel}
+                disabled={isDownloadingText || !textSlidesInput.trim()}
+                className="w-full bg-slate-900 hover:bg-black text-white py-3 rounded-xl font-bold text-sm shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isDownloadingText ? <Loader2 className="animate-spin w-4 h-4" /> : <Download className="w-4 h-4" />}
+                Download Quotes
+              </button>
+            </div>
+          </section>
 
           <section className="space-y-4 pt-4">
             <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">
@@ -2115,8 +2185,8 @@ export default function CinematicListingApp() {
       )}
 
       {/* --- CLEAR CONFIRMATION MODAL --- */}
-      {showClearConfirmModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+      <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4 transition-opacity duration-300 ${showClearConfirmModal ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}>
+        {showClearConfirmModal && (
           <div className="bg-white border border-slate-200 p-8 sm:p-10 rounded-[2.5rem] max-w-sm w-full text-center shadow-2xl relative animate-in zoom-in-95 duration-200">
             <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
               <Trash2 className="w-8 h-8 text-red-500" />
@@ -2143,12 +2213,12 @@ export default function CinematicListingApp() {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* --- TOP-UP MODAL --- */}
-      {showTopUpModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+      <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4 transition-opacity duration-300 ${showTopUpModal ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}>
+        {showTopUpModal && (
           <div className="bg-white border border-slate-200 p-12 rounded-[3.5rem] max-w-sm w-full text-center shadow-2xl">
             <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-8">
               <AlertCircle className="w-8 h-8 text-blue-600" />
@@ -2172,8 +2242,9 @@ export default function CinematicListingApp() {
               Back to Editor
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
     </div>
   );
 }

@@ -21,6 +21,8 @@ import json
 import soundfile as sf
 from kokoro import KPipeline
 import textwrap
+import random
+import math 
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from proglog import ProgressBarLogger
@@ -297,21 +299,41 @@ def resize_and_crop(img_path, target_w=1080, target_h=1350):
     
     return img.crop((left, top, right, bottom))
 
-def create_text_slide(text, social_handle, font_choice, base_dir, headshot_path=None, target_w=1080, target_h=1350):
-    # Premium Off-White Canvas 
-    img = Image.new('RGB', (target_w, target_h), (252, 252, 252)) 
-    draw = ImageDraw.Draw(img)
+def create_text_slide(text, social_handle, font_choice, base_dir, headshot_path=None, target_w=1080, target_h=1350, theme_color="#10295A", is_last_slide=False, current_slide=1, total_slides=1):
+    # 1. Parse Theme Color
+    try:
+        h = theme_color.lstrip('#')
+        bg_color = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+    except:
+        bg_color = (16, 41, 90)
 
+    # 2. Contrast Checker (YIQ)
+    yiq = ((bg_color[0] * 299) + (bg_color[1] * 587) + (bg_color[2] * 114)) / 1000
+    is_dark_bg = yiq < 128
+    
+    if is_dark_bg:
+        text_color = (250, 250, 250)      
+        accent_color = (200, 200, 205)    
+        handle_color = (180, 180, 185)    
+        quote_color = (min(255, bg_color[0] + 30), min(255, bg_color[1] + 30), min(255, bg_color[2] + 30))
+    else:
+        text_color = (30, 30, 32)         
+        accent_color = (220, 220, 222)    
+        handle_color = (110, 110, 115)    
+        quote_color = (max(0, bg_color[0] - 20), max(0, bg_color[1] - 20), max(0, bg_color[2] - 20))
+
+    img = Image.new('RGB', (target_w, target_h), bg_color) 
+    draw = ImageDraw.Draw(img)
     scale = target_h / 1350.0
     
-    # Decorative Quote Mark
+    # Watermark
     try:
-        quote_font = get_font(font_choice, int(250 * scale), base_dir)
-        draw.text((target_w * 0.12, target_h * 0.10), "“", font=quote_font, fill=(240, 240, 240))
+        q_font = get_font("Playfair-Bold", int(250 * scale), base_dir)
+        draw.text((target_w * 0.12, target_h * 0.10), "“", font=q_font, fill=quote_color)
     except: pass
 
-    # Dynamic Text Sizing & Wrapping
-    max_text_width = target_w * 0.78 
+    # Dynamic Text Sizing
+    max_text_width = target_w * 0.78
     font_size = int(85 * scale)
     main_font = get_font(font_choice, font_size, base_dir)
     
@@ -344,23 +366,20 @@ def create_text_slide(text, social_handle, font_choice, base_dir, headshot_path=
         main_font = get_font(font_choice, font_size, base_dir)
         lines = get_wrapped_lines(text, main_font, max_text_width)
 
-    # Draw Centered Quote Text
+    # Draw Text
     start_y = (target_h - total_text_height) // 2 - int(60 * scale)
     current_y = start_y
     for line, h in zip(lines, line_heights):
         bbox = draw.textbbox((0,0), line, font=main_font)
         line_w = bbox[2] - bbox[0]
         x = (target_w - line_w) // 2
-        draw.text((x, current_y), line, font=main_font, fill=(30, 30, 32))
+        draw.text((x, current_y), line, font=main_font, fill=text_color)
         current_y += h + line_spacing
 
-    # --- Draw Elegant Footer Stack ---
+    # Footer Stack
     footer_start_y = target_h - int(340 * scale)
-    
-    # Subtle divider
     divider_w = int(120 * scale)
-    draw.line([(target_w - divider_w)//2, footer_start_y, (target_w + divider_w)//2, footer_start_y], fill=(220, 220, 222), width=int(2*scale))
-    
+    draw.line([(target_w - divider_w)//2, footer_start_y, (target_w + divider_w)//2, footer_start_y], fill=accent_color, width=int(2*scale))
     footer_y = footer_start_y + int(50 * scale)
     
     # Avatar
@@ -381,29 +400,49 @@ def create_text_slide(text, social_handle, font_choice, base_dir, headshot_path=
             
             avatar_x = (target_w - avatar_size) // 2
             img.paste(hs, (avatar_x, footer_y), hs)
-            draw.ellipse((avatar_x, footer_y, avatar_x + avatar_size, footer_y + avatar_size), outline=(210, 210, 212), width=int(3*scale))
+            draw.ellipse((avatar_x, footer_y, avatar_x + avatar_size, footer_y + avatar_size), outline=accent_color, width=int(3*scale))
             
             footer_y += avatar_size + int(25 * scale)
-        except Exception as e:
-            print("Avatar render error:", e)
+        except: pass
 
-    # Social Handle (FIXED FONT SCALING)
+    # Handle
     if not social_handle:
-        social_handle = "Real Estate" # Fallback if empty
+        social_handle = "Real Estate"
         
     if social_handle:
-        handle_font_size = int(24 * scale)
-        # Re-using font_choice ensures it scales correctly and doesn't shrink to 10px!
-        handle_font = get_font(font_choice, handle_font_size, base_dir) 
+        handle_font_size = int(22 * scale)
+        handle_font = get_font(font_choice, handle_font_size, base_dir)
         clean_handle = social_handle if social_handle.startswith("@") else f"@{social_handle}"
-        
         spaced_handle = "   ".join(char for char in clean_handle.upper())
         bbox = draw.textbbox((0, 0), spaced_handle, font=handle_font)
-        handle_w = bbox[2] - bbox[0]
-        hx = (target_w - handle_w) // 2
+        hx = (target_w - (bbox[2] - bbox[0])) // 2
+        draw.text((hx, footer_y), spaced_handle, font=handle_font, fill=handle_color)
+
+    # --- MINIMALIST CHEVRON (BOTTOM RIGHT) ---
+    if not is_last_slide:
+        chevron_w = max(1, int(3 * scale)) 
+        size = int(18 * scale) 
         
-        # Darkened slightly for better visibility
-        draw.text((hx, footer_y), spaced_handle, font=handle_font, fill=(90, 90, 95))
+        cx = target_w - int(100 * scale)
+        cy = footer_y 
+        
+        draw.line([(cx - size, cy - size), (cx, cy)], fill=handle_color, width=chevron_w)
+        draw.line([(cx - size, cy + size), (cx, cy)], fill=handle_color, width=chevron_w)
+
+    # --- MAGAZINE-STYLE SLIDE COUNTER (TOP RIGHT) ---
+    if total_slides > 1:
+        counter_text = f"{current_slide:02d} / {total_slides:02d}"
+        
+        # BUMPED UP FONT SIZE: Increased from 20 to 35 so it's easily readable on mobile
+        counter_font = get_font("Montserrat", int(35 * scale), base_dir)
+        bbox = draw.textbbox((0, 0), counter_text, font=counter_font)
+        cw = bbox[2] - bbox[0]
+        
+        # Positioned elegantly in the top right corner
+        cx = target_w - cw - int(80 * scale)
+        cy = int(90 * scale)
+        
+        draw.text((cx, cy), counter_text, font=counter_font, fill=handle_color)
         
     return img
 
@@ -683,12 +722,155 @@ def create_carousel_end_card(agent_name, brokerage, phone, social_handle, base_d
 
     return img
 
+def create_modern_collage(image_paths, caption, base_dir, target_w=1080, target_h=1350, theme_color="#10295A"):
+    # 1. Premium Editorial Canvas (Alabaster / Off-White)
+    bg_color = (248, 248, 250)
+    img = Image.new('RGB', (target_w, target_h), bg_color)
+    draw = ImageDraw.Draw(img)
+    
+    # SEPARATED SCALES: Width for text/borders, Height for vertical spacing
+    scale_w = target_w / 1080.0
+    scale_h = target_h / 1350.0
+
+    try:
+        h_color = theme_color.lstrip('#')
+        brand_rgb = tuple(int(h_color[i:i+2], 16) for i in (0, 2, 4))
+    except:
+        brand_rgb = (16, 41, 90)
+
+    def prep_image(path, w, h, border_size=12):
+        base = resize_and_crop(path, w, h)
+        framed = Image.new('RGB', (w + border_size*2, h + border_size*2), (255, 255, 255))
+        framed.paste(base, (border_size, border_size))
+        f_draw = ImageDraw.Draw(framed)
+        f_draw.rectangle([0, 0, framed.width-1, framed.height-1], outline=(230, 230, 235), width=1)
+        return framed
+
+    border_w = int(8 * scale_w)
+    num_imgs = len(image_paths)
+
+    # ==========================================
+    # 3. DYNAMIC 2026 ASYMMETRICAL LAYOUTS
+    # ==========================================
+    if num_imgs == 1:
+        w1 = int(target_w * 0.82)
+        h1 = int(target_h * 0.65)
+        i1 = prep_image(image_paths[0], w1, h1, border_w)
+        
+        ix = (target_w - i1.width) // 2
+        iy = int(target_h * 0.12)
+        img.paste(i1, (ix, iy))
+        text_y_start = iy + i1.height + int(70 * scale_h)
+
+    elif num_imgs == 2:
+        w1 = int(target_w * 0.70)
+        h1 = int(target_h * 0.45)
+        i1 = prep_image(image_paths[0], w1, h1, border_w)
+        
+        w2 = int(target_w * 0.65)
+        h2 = int(target_h * 0.45)
+        i2 = prep_image(image_paths[1], w2, h2, border_w)
+        
+        ix1 = target_w - i1.width - int(45 * scale_w)
+        iy1 = int(target_h * 0.08)
+        img.paste(i1, (ix1, iy1))
+        
+        ix2 = int(45 * scale_w)
+        iy2 = iy1 + i1.height - int(90 * scale_h)
+        img.paste(i2, (ix2, iy2))
+        
+        text_y_start = iy2 + i2.height + int(60 * scale_h)
+
+    else:
+        w1 = int(target_w * 0.85)
+        h1 = int(target_h * 0.40)
+        i1 = prep_image(image_paths[0], w1, h1, border_w)
+        
+        w2 = int(target_w * 0.40)
+        h2 = int(target_h * 0.32)
+        i2 = prep_image(image_paths[1], w2, h2, border_w)
+        i3 = prep_image(image_paths[2], w2, h2, border_w)
+        
+        ix1 = (target_w - i1.width) // 2
+        iy1 = int(target_h * 0.08)
+        img.paste(i1, (ix1, iy1))
+        
+        gap = int(target_w * 0.85) - (i2.width + i3.width)
+        
+        ix2 = ix1
+        iy2 = iy1 + i1.height + int(25 * scale_h)
+        img.paste(i2, (ix2, iy2))
+        
+        ix3 = ix2 + i2.width + gap
+        iy3 = iy2
+        img.paste(i3, (ix3, iy3))
+        
+        text_y_start = iy3 + i3.height + int(50 * scale_h)
+
+    # ==========================================
+    # 4. LUXURY MINIMALIST TYPOGRAPHY & ACCENTS
+    # ==========================================
+    
+    # Tiny Architectural Crosshairs (+)
+    ch_margin = int(50 * scale_w)
+    ch_size = int(16 * scale_w)
+    ch_color = (200, 200, 205)
+    
+    draw.line([(ch_margin, ch_margin - ch_size//2), (ch_margin, ch_margin + ch_size//2)], fill=ch_color, width=1)
+    draw.line([(ch_margin - ch_size//2, ch_margin), (ch_margin + ch_size//2, ch_margin)], fill=ch_color, width=1)
+    draw.line([(target_w - ch_margin, ch_margin - ch_size//2), (target_w - ch_margin, ch_margin + ch_size//2)], fill=ch_color, width=1)
+    draw.line([(target_w - ch_margin - ch_size//2, ch_margin), (target_w - ch_margin + ch_size//2, ch_margin)], fill=ch_color, width=1)
+
+    # Accent Line
+    line_w = int(60 * scale_w)
+    draw.line([(target_w//2 - line_w//2, text_y_start), (target_w//2 + line_w//2, text_y_start)], fill=brand_rgb, width=int(3 * scale_w))
+    text_y_start += int(35 * scale_h)
+
+    # Text Rendering with Anti-Overflow Safety
+    font_size = int(24 * scale_w)
+    text_color = (40, 40, 42) 
+    
+    clean_cap = str(caption).replace('"', '').strip().upper()
+    
+    # Narrower text wrap width (32 instead of 50) because we add artificial spaces between letters
+    lines = textwrap.wrap(clean_cap, width=32) 
+    
+    max_w = target_w * 0.85 # Max width boundary (85% of screen)
+    font = get_font("Montserrat-Bold", font_size, base_dir)
+    
+    # Safety Loop: If the spaced-out text is STILL too wide, shrink the font dynamically!
+    while True:
+        widest = 0
+        for line in lines:
+            spaced_line = " ".join(char for char in line)
+            bbox = draw.textbbox((0, 0), spaced_line, font=font)
+            w = bbox[2] - bbox[0]
+            if w > widest: widest = w
+        
+        if widest <= max_w or font_size <= 14:
+            break
+            
+        font_size -= 2 # Shrink font slightly and try again
+        font = get_font("Montserrat-Bold", font_size, base_dir)
+
+    line_spacing = int(14 * scale_h)
+    
+    # Final Draw
+    for line in lines:
+        spaced_line = " ".join(char for char in line)
+        bbox = draw.textbbox((0, 0), spaced_line, font=font)
+        lw = bbox[2] - bbox[0]
+        lx = (target_w - lw) // 2
+        draw.text((lx, text_y_start), spaced_line, font=font, fill=text_color)
+        text_y_start += (bbox[3] - bbox[1]) + line_spacing
+
+    return img
+
 # --- VIDEO GENERATORS ---
 
 
 
 import textwrap
-import math
 
 # ---> Added is_own_listing, listing_agent, and listing_brokerage to the arguments <---
 def create_title_overlay(job_id, tw, th, addr, price, beds, baths, sqft, dur, lang, font_choice, show_price, show_details, status, agent, broker, phone, mls_source, mls_number, theme_color, base_dir, custom_cta=None, logo_path=None, hide_exact_addr=False, hook_text=None, is_own_listing=True, listing_agent=None, listing_brokerage=None):
@@ -1241,6 +1423,139 @@ def create_animated_clip(job_id, i, scene_data, tw, th, is_first, addr, price, b
     final = CompositeVideoClip(layers, size=(tw, th)).with_duration(dur)
     if vo_clip: final = final.with_audio(vo_clip)
     return final
+
+
+def create_seamless_panorama(scenes, base_dir, target_w=1080, target_h=1350, theme_color="#10295A"):
+    scenes_queue = scenes.copy()
+    slide_layouts = []
+    slide_index = 0
+    
+    # ==========================================
+    # 1. THE RHYTHM ENGINE (State Machine)
+    # ==========================================
+    # We dictate exactly what layout goes on what slide to guarantee a flawless pattern:
+    # Pattern: [FULL] -> [INSET + BRIDGE] -> [INSET] -> [FULL]...
+    while scenes_queue and slide_index < 8:
+        pattern_type = slide_index % 3
+        
+        # Force a FULL slide at the very end to cap the carousel beautifully without bridge overlaps
+        if slide_index >= 6 or len(scenes_queue) == 1:
+            layout = 'FULL'
+        elif pattern_type == 0:
+            layout = 'FULL'
+        elif pattern_type == 1:
+            layout = 'INSET_BRIDGE'
+        elif pattern_type == 2:
+            layout = 'INSET'
+            
+        slide_layouts.append((slide_index, layout))
+        
+        # Consume the correct number of images from the queue
+        if layout == 'FULL':
+            scenes_queue.pop(0)
+        elif layout == 'INSET_BRIDGE':
+            scenes_queue.pop(0)
+            scenes_queue.pop(0)
+        elif layout == 'INSET':
+            scenes_queue.pop(0)
+            
+        slide_index += 1
+
+    num_slides = slide_index
+    # If the absolute last slide generated was a bridge, it leaks into the next slide, so we add 1 blank receiver slide
+    if slide_layouts[-1][1] == 'INSET_BRIDGE':
+        num_slides += 1
+
+    # ==========================================
+    # 2. THE MASTER CANVAS
+    # ==========================================
+    canvas_w = target_w * num_slides
+    bg_color = (248, 248, 250) # Alabaster / Off-White
+    canvas = Image.new('RGB', (canvas_w, target_h), bg_color)
+    draw = ImageDraw.Draw(canvas)
+    
+    scale_w = target_w / 1080.0
+    scale_h = target_h / 1350.0
+    
+    try:
+        h_color = theme_color.lstrip('#')
+        brand_rgb = tuple(int(h_color[i:i+2], 16) for i in (0, 2, 4))
+    except:
+        brand_rgb = (16, 41, 90)
+        
+    # Draw the continuous luxury brand anchor line across the bottom of the entire panorama
+    line_y = int(target_h * 0.90)
+    draw.line([(0, line_y), (canvas_w, line_y)], fill=brand_rgb, width=int(4 * scale_h))
+
+    # Polaroid style thick white borders with subtle outline
+    def prep_image(path, w, h, border_size=16):
+        base = resize_and_crop(path, w, h)
+        framed = Image.new('RGB', (w + border_size*2, h + border_size*2), (255, 255, 255))
+        framed.paste(base, (border_size, border_size))
+        f_draw = ImageDraw.Draw(framed)
+        f_draw.rectangle([0, 0, framed.width-1, framed.height-1], outline=(220, 220, 225), width=2)
+        return framed
+
+    border_w = int(14 * scale_w)
+    
+    # ==========================================
+    # 3. DRAWING THE SPREADS
+    # ==========================================
+    scenes_queue = scenes.copy() 
+    
+    for slide_idx, layout in slide_layouts:
+        
+        if layout == 'FULL':
+            # A massive anchor image that commands the whole slide
+            img_path = scenes_queue.pop(0).image_path
+            w = int(1080 * 0.88 * scale_w)
+            h = int(1350 * 0.74 * scale_h)
+            ix = (slide_idx * target_w) + (target_w - w) // 2
+            iy = (target_h - h) // 2 - int(30 * scale_h)
+            
+            canvas.paste(prep_image(img_path, w, h, border_w), (ix, iy))
+            
+        elif layout == 'INSET_BRIDGE':
+            # This slide contains a top-left inset, and an ultra-wide bridge on the bottom right
+            img_inset_path = scenes_queue.pop(0).image_path
+            img_bridge_path = scenes_queue.pop(0).image_path
+            
+            # THE BRIDGE (Spans 57% of this slide, and 57% of the next slide!)
+            bw = int(1080 * 1.15 * scale_w) 
+            bh = int(1350 * 0.48 * scale_h)
+            seam_x = (slide_idx + 1) * target_w
+            bx = seam_x - (bw // 2)
+            by = target_h - bh - int(190 * scale_h) 
+            canvas.paste(prep_image(img_bridge_path, bw, bh, border_w), (bx, by))
+            
+            # THE INSET (Top Left, overlaps the bridge for 3D depth)
+            iw = int(1080 * 0.65 * scale_w)
+            ih = int(1350 * 0.45 * scale_h)
+            ix = (slide_idx * target_w) + int(50 * scale_w)
+            iy = int(100 * scale_h)
+            canvas.paste(prep_image(img_inset_path, iw, ih, border_w), (ix, iy))
+            
+        elif layout == 'INSET':
+            # This slide already receives the right-half of the bridge. 
+            # We place an inset on the Top Right to balance it beautifully.
+            img_inset_path = scenes_queue.pop(0).image_path
+            
+            iw = int(1080 * 0.70 * scale_w)
+            ih = int(1350 * 0.50 * scale_h)
+            ix = (slide_idx * target_w) + target_w - iw - int(50 * scale_w)
+            iy = int(120 * scale_h)
+            canvas.paste(prep_image(img_inset_path, iw, ih, border_w), (ix, iy))
+
+    # ==========================================
+    # 4. SLICING THE CANVAS
+    # ==========================================
+    frames = []
+    for i in range(num_slides):
+        box = (i * target_w, 0, (i + 1) * target_w, target_h)
+        frame = canvas.crop(box)
+        frames.append(frame)
+        
+    return frames
 
 async def render_cinematic_video(job_id, req, output_path, base_dir):
     set_progress(job_id, 2)
